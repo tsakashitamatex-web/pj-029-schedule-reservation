@@ -36,6 +36,11 @@ function dateFromKey(k:string){ const [y,m,d]=k.split('-').map(Number); return n
 function addDays(d:Date,n:number){ const x=new Date(d); x.setDate(x.getDate()+n); return x }
 function startOfWeek(d:Date){ const x=new Date(d); const day=x.getDay(); return addDays(x,day===0?-6:1-day) }
 function todayKey(){ return toDateKey(new Date()) }
+function addOneHour(time:string){
+  const [h,m]=time.split(':').map(Number)
+  const next=Math.min(h+1,23)
+  return `${pad(next)}:${pad(m)}`
+}
 
 function occursOn(event: UiEvent, date: string) {
   const end = event.endDate || event.date
@@ -121,9 +126,11 @@ export default function Home(){
       const dateInput=document.querySelector<HTMLInputElement>('input[name="date"]')
       const endDateInput=document.querySelector<HTMLInputElement>('input[name="endDate"]')
       const timeInput=document.querySelector<HTMLInputElement>('input[name="startTime"]')
+      const endTimeInput=document.querySelector<HTMLInputElement>('input[name="endTime"]')
       if(dateInput) dateInput.value=date
       if(endDateInput) endDateInput.value=date
       if(timeInput) timeInput.value=time
+      if(endTimeInput) endTimeInput.value=addOneHour(time)
     })
   }
 
@@ -231,7 +238,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.2.2</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.2.3</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -366,7 +373,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.2.2</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.2.3</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

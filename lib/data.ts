@@ -774,6 +774,9 @@ type Pj020MigrationPayload = {
     purpose?: string
     visitorCompany?: string
     visitorInfo?: string
+    internalCount?: string
+    visitorCount?: string
+    createdAt?: number
   }>
 }
 
@@ -867,6 +870,13 @@ export async function importPj020MigrationData(raw: string) {
     const resourceMasterId = `pj020-${resource.id}`
     const title = row.meetingName || row.purpose || `${resource.name}予約`
     const externalParticipants = [row.visitorCompany, row.visitorInfo].filter(Boolean).join(' ')
+    const detailParts = [
+      row.purpose ? `目的：${row.purpose}` : '',
+      row.internalCount ? `社内人数：${row.internalCount}` : '',
+      row.visitorCount ? `来訪者人数：${row.visitorCount}` : '',
+      row.visitorCompany ? `来訪会社：${row.visitorCompany}` : '',
+      row.visitorInfo ? `来訪者：${row.visitorInfo}` : '',
+    ].filter(Boolean)
     const eventCategory = resource.categoryId === 'meeting' ? 'meeting' : 'other'
     const meetingRoom = resource.categoryId === 'meeting' ? resource.name : ''
     const vehicle = resource.categoryId === 'car' ? resource.name : ''
@@ -889,7 +899,7 @@ export async function importPj020MigrationData(raw: string) {
         participantEmails: [],
         externalParticipants,
         location: '',
-        description: row.purpose || '',
+        description: detailParts.join('\n'),
         resource: resource.name,
         resourceIds: [resourceMasterId],
         resourceNames: [resource.name],
@@ -900,6 +910,16 @@ export async function importPj020MigrationData(raw: string) {
         status: 'active',
         version: '0.4.3',
         migratedAt: serverTimestamp(),
+        sourceCreatedAt: row.createdAt ?? null,
+        legacyReservation: {
+          user: row.user ?? '',
+          internalCount: row.internalCount ?? '',
+          visitorCount: row.visitorCount ?? '',
+          visitorCompany: row.visitorCompany ?? '',
+          visitorInfo: row.visitorInfo ?? '',
+          purpose: row.purpose ?? '',
+          meetingName: row.meetingName ?? '',
+        },
         updatedAt: serverTimestamp(),
       },
     })

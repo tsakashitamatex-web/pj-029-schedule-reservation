@@ -1,4 +1,5 @@
 import { getApps, initializeApp } from 'firebase/app'
+import { getAuth, signInAnonymously, type Auth } from 'firebase/auth'
 import { getFirestore, type Firestore } from 'firebase/firestore'
 
 export type RuntimeConfig = {
@@ -15,6 +16,7 @@ export type RuntimeConfig = {
 
 let runtimeConfigPromise: Promise<RuntimeConfig> | null = null
 let dbPromise: Promise<Firestore | null> | null = null
+let authPromise: Promise<Auth | null> | null = null
 
 export function getRuntimeConfig() {
   if (!runtimeConfigPromise) {
@@ -31,13 +33,35 @@ export function isFirebaseConfigValid(config: RuntimeConfig['firebase']) {
   return Boolean(config.apiKey && config.authDomain && config.projectId && config.appId)
 }
 
+async function getFirebaseApp() {
+  const runtime = await getRuntimeConfig()
+  if (!isFirebaseConfigValid(runtime.firebase)) return null
+  return getApps()[0] ?? initializeApp(runtime.firebase)
+}
+
 export function getDb() {
   if (!dbPromise) {
-    dbPromise = getRuntimeConfig().then((runtime) => {
-      if (!isFirebaseConfigValid(runtime.firebase)) return null
-      const app = getApps()[0] ?? initializeApp(runtime.firebase)
-      return getFirestore(app)
-    })
+    dbPromise = getFirebaseApp().then((app) => app ? getFirestore(app) : null)
   }
   return dbPromise
+}
+
+export function getFirebaseAuth() {
+  if (!authPromise) {
+    authPromise = getFirebaseApp().then((app) => app ? getAuth(app) : null)
+  }
+  return authPromise
+}
+
+export async function ensureSignedIn() {
+  const auth = await getFirebaseAuth()
+  if (!auth) return false
+  if (auth.currentUser) return true
+  try {
+    await signInAnonymously(auth)
+    return true
+  } catch (error) {
+    console.error('Firebase anonymous sign-in failed', error)
+    return false
+  }
 }

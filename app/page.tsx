@@ -36,7 +36,7 @@ export default function Home(){
   const [firebaseConfigured,setFirebaseConfigured]=useState(false)
 
   useEffect(()=>{
-    let stop = () => undefined
+    let stop: () => void = () => {}
     let active = true
 
     getRuntimeConfig()

@@ -6,3 +6,38 @@
 
 .detail-modal{width:min(680px,100%)}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}.detail-grid>div,.detail-description{padding:12px;border:1px solid var(--line);border-radius:10px;background:#f8fafc}.detail-grid span,.detail-description span{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}.detail-grid strong{font-size:14px}.detail-description{margin-top:14px}.detail-description p{margin:0;white-space:pre-wrap}.detail-actions{justify-content:space-between}.btn.danger{background:#fff;border-color:#dc2626;color:#b91c1c}.btn.danger:hover{background:#fef2f2}.month-event{cursor:pointer}
 @media(max-width:760px){.detail-grid{grid-template-columns:1fr}}
+
+/* Fix: long schedule forms must remain usable on smaller-height screens */
+.modal-backdrop{
+  align-items:flex-start;
+  overflow-y:auto;
+}
+.schedule-modal{
+  max-height:calc(100dvh - 32px);
+  overflow-y:auto;
+  margin:auto;
+  overscroll-behavior:contain;
+}
+.schedule-modal .modal-head{
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:#fff;
+  padding-bottom:8px;
+}
+.schedule-modal .modal-actions{
+  position:sticky;
+  bottom:0;
+  z-index:2;
+  background:#fff;
+  padding-top:12px;
+  padding-bottom:4px;
+  border-top:1px solid var(--line);
+}
+@media(max-width:760px){
+  .modal-backdrop{padding:8px}
+  .schedule-modal{
+    max-height:calc(100dvh - 16px);
+    padding-bottom:10px;
+  }
+}

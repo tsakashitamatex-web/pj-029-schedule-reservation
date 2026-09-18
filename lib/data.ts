@@ -17,6 +17,8 @@ export type EmployeeRecord = {
   id: string
   name: string
   email: string
+  division: string
+  group: string
   department: string
   active: boolean
 }
@@ -323,7 +325,9 @@ export function subscribeEmployees(onChange: (employees: EmployeeRecord[]) => vo
             id: employeeDoc.id,
             name: data.name ?? '',
             email: data.email ?? '',
-            department: data.department ?? '',
+            division: data.division ?? '',
+            group: data.group ?? '',
+            department: data.department ?? data.group ?? data.division ?? '',
             active: data.active ?? true,
           }
         })
@@ -360,6 +364,18 @@ export async function saveEmployee(input: Omit<EmployeeRecord, 'id'>, employeeId
   return ref.id
 }
 
+
+export async function deactivateEmployee(employeeId: string) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+
+  await updateDoc(doc(db, 'employees', employeeId), {
+    active: false,
+    updatedAt: serverTimestamp(),
+  })
+}
+
 export async function saveFeedback(input: FeedbackInput) {
   const signedIn = await ensureSignedIn()
   const db = await getDb()
@@ -367,7 +383,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.3.0',
+    appVersion: '0.3.1',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

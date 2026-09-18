@@ -3,14 +3,15 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { saveCalendarEvent, saveFeedback, subscribeCalendarEvents, type CalendarEventRecord } from '../lib/data'
 import { firebaseConfigured } from '../lib/firebase'
+import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
 type ViewMode = 'month' | 'week' | 'day'
 type UiEvent = CalendarEventRecord & { demo?: boolean }
 
 const demoEvents: UiEvent[] = [
-  { id: 'e1', date: '2026-09-21', startTime: '10:00', endTime: '11:00', title: 'ABC社 打合せ', participants: '坂下・岩井', resource: '第1会議室', notifyEmail: true, notifyTeams: true, demo: true },
-  { id: 'e2', date: '2026-09-22', startTime: '13:00', endTime: '14:00', title: 'XYZ社 訪問', participants: '坂下', resource: '社用車A', notifyEmail: true, notifyTeams: false, demo: true },
-  { id: 'e3', date: '2026-09-24', startTime: '10:00', endTime: '11:00', title: 'RD定例', participants: '末盛・坂下', resource: '第2会議室', notifyEmail: false, notifyTeams: true, demo: true },
+  { id: 'e1', date: '2026-09-21', startTime: '10:00', endTime: '11:00', title: 'ABC社 打合せ', participants: '坂下・岩井', resource: '第1会議室', externalParticipants: 'ABC社 田中様', notifyEmail: true, notifyTeams: true, demo: true },
+  { id: 'e2', date: '2026-09-22', startTime: '13:00', endTime: '14:00', title: 'XYZ社 訪問', participants: '坂下', resource: '社用車A', externalParticipants: '', notifyEmail: true, notifyTeams: false, demo: true },
+  { id: 'e3', date: '2026-09-24', startTime: '10:00', endTime: '11:00', title: 'RD定例', participants: '末盛・坂下', resource: '第2会議室', externalParticipants: '', notifyEmail: false, notifyTeams: true, demo: true },
 ]
 const resources = ['', '第1会議室', '第2会議室', '社用車A']
 const times = ['9:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00']
@@ -71,6 +72,7 @@ export default function Home(){
       startTime:String(form.get('startTime')||'10:00'),
       endTime:String(form.get('endTime')||'11:00'),
       participants:String(form.get('participants')||''),
+      externalParticipants:String(form.get('externalParticipants')||''),
       resource:String(form.get('resource')||''),
       notifyEmail:form.get('notifyEmail')==='on',
       notifyTeams:form.get('notifyTeams')==='on',
@@ -83,7 +85,26 @@ export default function Home(){
       const result=await saveCalendarEvent(input)
       if(result.demo) setEvents(prev=>[...prev,{...input,id:result.id,demo:true}])
       setSelectedDate(input.date); setEventState('sent')
-      setNotice(result.demo?'予定を画面へ追加しました。Firebase接続後はFirestoreに保存されます。':'予定・設備予約をFirestoreへ保存しました。')
+      let message = result.demo
+        ? '予定を画面へ追加しました。Firebase接続後はFirestoreに保存されます。'
+        : '予定・設備予約をFirestoreへ保存しました。'
+
+      if (shouldOpenTeams(input)) {
+        const teams = await openTeamsNotification(input)
+        if (teams.ok) {
+          message += teams.copied
+            ? ' Teams通知文をコピーし、通知先を開きました。'
+            : ' Teams通知先を開きました。'
+        } else if (teams.reason === 'NO_URL') {
+          message += ' Teams通知先リンクが未設定です。'
+        } else {
+          message += teams.copied
+            ? ' Teams通知文はコピー済みですが、Teamsを開けませんでした。'
+            : ' Teamsを開けませんでした。'
+        }
+      }
+
+      setNotice(message)
     }catch(err){
       setEventState(err instanceof Error && err.message==='RESERVATION_CONFLICT'?'conflict':'error')
     }
@@ -105,7 +126,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.1.2</div><h1>統合スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.1.3</div><h1>統合スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('設備予約専用画面は次フェーズでPJ-020資産を統合します。')}>設備予約</button>
@@ -175,8 +196,9 @@ export default function Home(){
         <label className="field">タイトル<input name="title" required defaultValue="ABC社 打合せ"/></label>
         <div className="form-grid"><label className="field">日付<input name="date" type="date" required defaultValue={selectedDate}/></label><label className="field">開始<input name="startTime" type="time" required defaultValue="10:00"/></label><label className="field">終了<input name="endTime" type="time" required defaultValue="11:00"/></label></div>
         <label className="field">社内参加者<input name="participants" defaultValue="坂下・岩井"/></label>
+        <label className="field">外部参加者・来訪者<input name="externalParticipants" placeholder="例：ABC社 田中様"/></label>
         <label className="field">会議室・社用車<select name="resource" defaultValue="第1会議室">{resources.map(r=><option value={r} key={r||'none'}>{r||'使用しない'}</option>)}</select></label>
-        <div className="check-row"><label><input name="notifyEmail" type="checkbox" defaultChecked/> メール通知</label><label><input name="notifyTeams" type="checkbox" defaultChecked/> Teams通知</label></div>
+        <div className="check-row"><label><input name="notifyEmail" type="checkbox" defaultChecked/> メール通知</label><label><input name="notifyTeams" type="checkbox" defaultChecked/> Teams通知（来客会議室予約）</label></div><div className="auto-info">Teams通知はPJ-020と同じく、通知文をコピーして指定Teamsチャットを開く方式です。</div>
         {eventState==='conflict'&&<div className="error">この設備は指定時間帯に既に予約されています。時間または設備を変更してください。</div>}
         {eventState==='error'&&<div className="error">保存に失敗しました。入力内容またはFirebase設定を確認してください。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setEventOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={eventState==='saving'}>{eventState==='saving'?'保存中…':'登録する'}</button></div>
@@ -188,7 +210,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.1.2</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.1.3</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

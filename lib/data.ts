@@ -68,7 +68,7 @@ export async function checkReservationConflict(input: Pick<CalendarEventInput, '
 }
 
 export async function saveCalendarEvent(input: CalendarEventInput) {
-  if (minutes(input.endTime) <= minutes(input.startTime)) {
+  if (!input.allDay && minutes(input.endTime) <= minutes(input.startTime)) {
     throw new Error('END_BEFORE_START')
   }
 
@@ -76,7 +76,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
   const db = await getDb()
   if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
 
-  const conflict = await checkReservationConflict(input)
+  const conflict = input.allDay ? null : await checkReservationConflict(input)
   if (conflict) throw new Error('RESERVATION_CONFLICT')
 
   const eventRef = await addDoc(collection(db, 'events'), {

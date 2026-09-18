@@ -350,8 +350,9 @@ export default function Home(){
 
   async function submitResourceMaster(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
+    const formElement=e.currentTarget
     setMasterState('saving'); setMasterError('')
-    const form=new FormData(e.currentTarget)
+    const form=new FormData(formElement)
     try{
       await saveResourceMaster({
         name:String(form.get('resourceName')||''),
@@ -360,14 +361,15 @@ export default function Home(){
         sortOrder:Number(form.get('resourceSortOrder')||999),
         active:true,
       }, editingResource?.id)
-      setEditingResource(null); e.currentTarget.reset(); setMasterState('idle')
+      setEditingResource(null); formElement.reset(); setMasterState('idle')
     }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
   }
 
   async function submitEventCategory(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
+    const formElement=e.currentTarget
     setMasterState('saving'); setMasterError('')
-    const form=new FormData(e.currentTarget)
+    const form=new FormData(formElement)
     try{
       await saveEventCategory({
         name:String(form.get('categoryName')||''),
@@ -375,7 +377,7 @@ export default function Home(){
         sortOrder:Number(form.get('categorySortOrder')||999),
         active:true,
       }, editingCategory?.id)
-      setEditingCategory(null); e.currentTarget.reset(); setMasterState('idle')
+      setEditingCategory(null); formElement.reset(); setMasterState('idle')
     }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
   }
 

@@ -1,51 +1,53 @@
 # PJ-029 統合スケジュール・予約管理アプリ
 
-Ver.0.1.3 開発中。
+Ver.0.4.3 開発中。
 
 ## 現在実装済み
 - 月／週／日カレンダー切替
-- 予定作成モーダル
-- Firestoreから予定をリアルタイム取得
-- 予定の画面即時反映（Firebase未設定時はデモモード）
-- 会議室／社用車を予定に紐付ける入力
-- 同一設備・同一日の時間帯重複チェック
-- メール通知・Teams通知キューの作成
-- 全画面共通フィードバックボタン
+- 会社予定・個人予定・部署予定
+- 社員マスタと個人色
+- 予定種別マスタ
+- 管理区分マスタ
+- リソース種別マスタ
+- 設備・リソースマスタ
+- 会議室／社用車／試験機など汎用リソースの複数予約
+- 同一設備・同一時間帯の重複チェック
+- PJ-020予約アプリのマスタ／予約情報移行
+- PJ-020元ID保持による再取込時の重複防止
+- メール通知・Teams通知キュー
+- 全画面共通フィードバック
 - Firebase / Firestore接続基盤
-- `events` / `reservations` / `feedbacks` / `notifications` への保存処理
-- PC / iPhone向けレスポンシブ基本設計
+- PC / スマホ向けレスポンシブ基本設計
+
+## PJ-020からの移行
+PJ-020予約アプリの設定画面で「PJ-029移行データをコピー」を実行し、
+PJ-029の「各種マスタ」→「予約アプリから取り込み」へ貼り付けて取り込みます。
+
+移行対象:
+- 管理区分
+- リソース分類
+- 設備・リソース
+- 予約情報
+- 予約者
+- 会議名／目的
+- 来訪会社／来訪者
+- 社内人数／来訪者人数
+
+同じPJ-020予約IDは同じFirestore IDへ保存するため、再取り込みしても重複登録しません。
 
 ## Firebase設定
-`.env.example` を `.env.local` にコピーし、Firebase Web Appの設定値を入力してください。
-
-```bash
-cp .env.example .env.local
-```
-
-必要項目：
-- NEXT_PUBLIC_FIREBASE_API_KEY
-- NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
-- NEXT_PUBLIC_FIREBASE_PROJECT_ID
-- NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
-- NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
-- NEXT_PUBLIC_FIREBASE_APP_ID
+Cloud Runでは `/api/runtime-config` が環境変数からFirebase設定を配信します。
 
 ## Firestore collections
 - `events`: 予定本体
-- `reservations`: 会議室・社用車予約
+- `reservations`: 設備・リソース予約
+- `employees`: 社員マスタ
+- `managementDivisions`: 管理区分マスタ
+- `resourceTypes`: リソース種別マスタ
+- `resourceMasters`: 設備・リソースマスタ
+- `eventCategories`: 予定種別マスタ
 - `feedbacks`: 改善提案・不具合報告
 - `notifications`: メール／Teams送信キュー
 
-## 次の実装
-1. PJ-020のTeams通知方式移植
-2. メール実送信処理
-3. Firebase Authentication
-4. 設備予約専用画面
-5. 管理画面・社員／部署／設備マスタ
-6. 予定編集・取消
-
-
 ## Teams通知
 PJ-020の既存運用を継承し、来客を伴う会議室予約では通知文を自動コピーして指定Teamsチャットを開きます。
-
-Teams通知先は公開リポジトリへ直書きせず、Vercel / ローカル環境変数 `NEXT_PUBLIC_TEAMS_MEETING_CHAT_URL` に設定してください。

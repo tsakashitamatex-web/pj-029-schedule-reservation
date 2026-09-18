@@ -67,7 +67,7 @@ export type CalendarEventInput = {
   allDay: boolean
   category: string
   scope: 'personal' | 'department' | 'company'
-  source: 'pj029' | 'company_calendar'
+  source: 'pj029' | 'company_calendar' | 'pj020'
   participants: string
   participantIds: string[]
   participantEmails: string[]
@@ -86,6 +86,7 @@ export type CalendarEventInput = {
 export type CalendarEventRecord = CalendarEventInput & {
   id: string
   status?: string
+  sourceReservationId?: string
 }
 
 export type FeedbackInput = {
@@ -150,7 +151,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.4.2',
+    version: '0.4.3',
   })
 
   const writes: Promise<unknown>[] = []
@@ -219,7 +220,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.4.2',
+    version: '0.4.3',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -276,7 +277,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.4.2',
+    version: '0.4.3',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -336,6 +337,7 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
         notifyEmail: data.notifyEmail ?? false,
         notifyTeams: data.notifyTeams ?? false,
         status: data.status,
+        sourceReservationId: (data as Partial<CalendarEventInput> & { sourceReservationId?: string }).sourceReservationId,
       }
     })
     onChange(events)
@@ -751,6 +753,188 @@ export async function deactivateEventCategory(categoryId: string) {
   })
 }
 
+
+type Pj020MigrationPayload = {
+  source: 'PJ-020'
+  schemaVersion: number
+  setup?: {
+    categories?: Array<{ id: string; name: string; color?: string }>
+    resources?: Array<{ id: string; name: string; categoryId: string; managementGroupId?: string; color?: string }>
+    managementGroups?: Array<{ id: string; name: string }>
+  }
+  reservations?: Array<{
+    id: string
+    resourceId: string
+    date: string
+    endDate?: string
+    start: number
+    end: number
+    user?: string
+    meetingName?: string
+    purpose?: string
+    visitorCompany?: string
+    visitorInfo?: string
+  }>
+}
+
+function hhmm(totalMinutes: number) {
+  const value = Math.max(0, Math.min(24 * 60 - 1, Number(totalMinutes) || 0))
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
+}
+
+function migrationTypeId(categoryId: string, categoryName?: string) {
+  if (categoryId === 'meeting' || categoryName?.includes('会議')) return 'meeting_room'
+  if (categoryId === 'car' || categoryName?.includes('車')) return 'vehicle'
+  return `pj020-type-${categoryId}`
+}
+
+export async function importPj020MigrationData(raw: string) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+
+  let payload: Pj020MigrationPayload
+  try {
+    payload = JSON.parse(raw) as Pj020MigrationPayload
+  } catch {
+    throw new Error('INVALID_JSON')
+  }
+  if (payload.source !== 'PJ-020' || !payload.setup) throw new Error('INVALID_PJ020_DATA')
+
+  const categories = payload.setup.categories ?? []
+  const managementGroups = payload.setup.managementGroups ?? []
+  const resources = payload.setup.resources ?? []
+  const reservations = payload.reservations ?? []
+  const categoryById = new Map(categories.map((row) => [row.id, row]))
+  const resourceById = new Map(resources.map((row) => [row.id, row]))
+
+  const operations: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = []
+
+  managementGroups.forEach((row, index) => {
+    operations.push({
+      ref: doc(db, 'managementDivisions', `pj020-${row.id}`),
+      data: {
+        name: row.name,
+        color: index % 2 === 0 ? '#2563eb' : '#059669',
+        sortOrder: index + 1,
+        active: true,
+        source: 'pj020',
+        sourceId: row.id,
+        updatedAt: serverTimestamp(),
+      },
+    })
+  })
+
+  categories.forEach((row, index) => {
+    const typeId = migrationTypeId(row.id, row.name)
+    operations.push({
+      ref: doc(db, 'resourceTypes', typeId),
+      data: {
+        name: row.name === '社用車' ? '車両' : row.name,
+        color: row.id === 'meeting' ? '#2563eb' : row.id === 'car' ? '#059669' : '#6b7280',
+        sortOrder: index + 1,
+        active: true,
+        source: 'pj020',
+        sourceId: row.id,
+        updatedAt: serverTimestamp(),
+      },
+    })
+  })
+
+  resources.forEach((row, index) => {
+    const category = categoryById.get(row.categoryId)
+    operations.push({
+      ref: doc(db, 'resourceMasters', `pj020-${row.id}`),
+      data: {
+        name: row.name,
+        typeId: migrationTypeId(row.categoryId, category?.name),
+        managementDivisionId: row.managementGroupId ? `pj020-${row.managementGroupId}` : '',
+        color: row.color || '#2463a8',
+        sortOrder: index + 1,
+        active: true,
+        source: 'pj020',
+        sourceId: row.id,
+        updatedAt: serverTimestamp(),
+      },
+    })
+  })
+
+  reservations.forEach((row) => {
+    const resource = resourceById.get(row.resourceId)
+    if (!resource) return
+    const category = categoryById.get(resource.categoryId)
+    const eventId = `pj020-${row.id}`
+    const resourceMasterId = `pj020-${resource.id}`
+    const title = row.meetingName || row.purpose || `${resource.name}予約`
+    const externalParticipants = [row.visitorCompany, row.visitorInfo].filter(Boolean).join(' ')
+    const eventCategory = resource.categoryId === 'meeting' ? 'meeting' : 'other'
+    const meetingRoom = resource.categoryId === 'meeting' ? resource.name : ''
+    const vehicle = resource.categoryId === 'car' ? resource.name : ''
+
+    operations.push({
+      ref: doc(db, 'events', eventId),
+      data: {
+        title,
+        date: row.date,
+        endDate: row.endDate || row.date,
+        startTime: hhmm(row.start),
+        endTime: hhmm(row.end),
+        allDay: false,
+        category: eventCategory,
+        scope: 'company',
+        source: 'pj020',
+        sourceReservationId: row.id,
+        participants: row.user || '',
+        participantIds: [],
+        participantEmails: [],
+        externalParticipants,
+        location: '',
+        description: row.purpose || '',
+        resource: resource.name,
+        resourceIds: [resourceMasterId],
+        resourceNames: [resource.name],
+        meetingRoom,
+        vehicle,
+        notifyEmail: false,
+        notifyTeams: false,
+        status: 'active',
+        version: '0.4.3',
+        migratedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+    })
+    operations.push({
+      ref: doc(db, 'reservations', `pj020-${row.id}`),
+      data: {
+        eventId,
+        resourceName: resource.name,
+        resourceId: resourceMasterId,
+        date: row.date,
+        endDate: row.endDate || row.date,
+        startTime: hhmm(row.start),
+        endTime: hhmm(row.end),
+        source: 'pj020',
+        sourceReservationId: row.id,
+        status: 'active',
+        updatedAt: serverTimestamp(),
+      },
+    })
+  })
+
+  for (let start = 0; start < operations.length; start += 350) {
+    const batch = writeBatch(db)
+    operations.slice(start, start + 350).forEach((operation) => batch.set(operation.ref, operation.data, { merge: true }))
+    await batch.commit()
+  }
+
+  return {
+    managementDivisions: managementGroups.length,
+    resourceTypes: categories.length,
+    resources: resources.length,
+    reservations: reservations.length,
+  }
+}
+
 export async function saveFeedback(input: FeedbackInput) {
   const signedIn = await ensureSignedIn()
   const db = await getDb()
@@ -758,7 +942,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.4.2',
+    appVersion: '0.4.3',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

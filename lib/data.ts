@@ -20,6 +20,7 @@ export type EmployeeRecord = {
   division: string
   group: string
   department: string
+  color: string
   active: boolean
 }
 
@@ -328,6 +329,7 @@ export function subscribeEmployees(onChange: (employees: EmployeeRecord[]) => vo
             division: data.division ?? '',
             group: data.group ?? '',
             department: data.department ?? data.group ?? data.division ?? '',
+            color: data.color ?? '#2463a8',
             active: data.active ?? true,
           }
         })

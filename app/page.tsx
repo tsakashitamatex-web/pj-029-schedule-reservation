@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { saveCalendarEvent, saveFeedback, subscribeCalendarEvents, type CalendarEventRecord } from '../lib/data'
-import { firebaseConfigured } from '../lib/firebase'
+import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
 type ViewMode = 'month' | 'week' | 'day'
@@ -24,7 +24,7 @@ function addDays(d:Date,n:number){ const x=new Date(d); x.setDate(x.getDate()+n)
 function startOfWeek(d:Date){ const x=new Date(d); const day=x.getDay(); return addDays(x,day===0?-6:1-day) }
 
 export default function Home(){
-  const [events,setEvents]=useState<UiEvent[]>(firebaseConfigured?[]:demoEvents)
+  const [events,setEvents]=useState<UiEvent[]>(demoEvents)
   const [viewMode,setViewMode]=useState<ViewMode>('week')
   const [selectedDate,setSelectedDate]=useState('2026-09-24')
   const [eventOpen,setEventOpen]=useState(false)
@@ -32,11 +32,34 @@ export default function Home(){
   const [eventState,setEventState]=useState<'idle'|'saving'|'sent'|'error'|'conflict'>('idle')
   const [feedbackState,setFeedbackState]=useState<'idle'|'saving'|'sent'|'error'>('idle')
   const [notice,setNotice]=useState('')
-  const [loadState,setLoadState]=useState(firebaseConfigured?'読込中':'デモ')
+  const [loadState,setLoadState]=useState<'確認中'|'同期中'|'デモ'>('確認中')
+  const [firebaseConfigured,setFirebaseConfigured]=useState(false)
 
   useEffect(()=>{
-    if(!firebaseConfigured) return
-    return subscribeCalendarEvents(rows=>{ setEvents(rows); setLoadState('同期中') })
+    let stop = () => undefined
+    let active = true
+
+    getRuntimeConfig()
+      .then((runtime)=>{
+        if (!active) return
+        const configured = isFirebaseConfigValid(runtime.firebase)
+        setFirebaseConfigured(configured)
+        setLoadState(configured ? '同期中' : 'デモ')
+        if (configured) {
+          setEvents([])
+          stop = subscribeCalendarEvents(rows=>{ setEvents(rows); setLoadState('同期中') })
+        }
+      })
+      .catch(()=>{
+        if (!active) return
+        setFirebaseConfigured(false)
+        setLoadState('デモ')
+      })
+
+    return ()=>{
+      active = false
+      stop()
+    }
   },[])
 
   const selected=dateFromKey(selectedDate)
@@ -44,7 +67,7 @@ export default function Home(){
   const weekDays=Array.from({length:5},(_,i)=>addDays(weekStart,i))
   const monthGridStart=startOfWeek(new Date(selected.getFullYear(),selected.getMonth(),1))
   const monthDays=Array.from({length:42},(_,i)=>addDays(monthGridStart,i))
-  const connectionText=useMemo(()=>firebaseConfigured?`Firestore ${loadState}`:'デモモード：Firebase設定待ち',[loadState])
+  const connectionText=useMemo(()=>firebaseConfigured?`Firestore ${loadState}`:loadState==='確認中'?'接続確認中':'デモモード：Firebase設定待ち',[firebaseConfigured,loadState])
 
   function move(step:number){
     if(viewMode==='month'){

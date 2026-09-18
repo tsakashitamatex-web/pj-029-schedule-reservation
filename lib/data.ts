@@ -396,6 +396,58 @@ export async function deactivateEmployee(employeeId: string) {
 }
 
 
+
+export async function ensureDefaultMasters() {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) return
+
+  const [resourceSnapshot, categorySnapshot] = await Promise.all([
+    getDocs(collection(db, 'resourceMasters')),
+    getDocs(collection(db, 'eventCategories')),
+  ])
+
+  const batch = writeBatch(db)
+
+  if (resourceSnapshot.empty) {
+    const defaults: Array<Omit<ResourceMasterRecord, 'id'>> = [
+      { name: '第1会議室', kind: 'meeting_room', color: '#2563eb', sortOrder: 1, active: true },
+      { name: '第2会議室', kind: 'meeting_room', color: '#2563eb', sortOrder: 2, active: true },
+      { name: '社用車A', kind: 'vehicle', color: '#059669', sortOrder: 1, active: true },
+    ]
+    defaults.forEach((row, index) => {
+      batch.set(doc(db, 'resourceMasters', `default-resource-${index + 1}`), {
+        ...row,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    })
+  }
+
+  if (categorySnapshot.empty) {
+    const defaults: Array<{ id: string } & Omit<EventCategoryRecord, 'id'>> = [
+      { id: 'meeting', name: '会議', color: '#2563eb', sortOrder: 1, active: true },
+      { id: 'visitor', name: '来客', color: '#db2777', sortOrder: 2, active: true },
+      { id: 'business_trip', name: '出張', color: '#0891b2', sortOrder: 3, active: true },
+      { id: 'construction', name: '工事', color: '#059669', sortOrder: 4, active: true },
+      { id: 'outing', name: '外出', color: '#4f46e5', sortOrder: 5, active: true },
+      { id: 'leave', name: '休暇', color: '#dc2626', sortOrder: 6, active: true },
+      { id: 'company_event', name: '会社行事', color: '#d97706', sortOrder: 7, active: true },
+      { id: 'other', name: 'その他', color: '#6b7280', sortOrder: 8, active: true },
+    ]
+    defaults.forEach((row) => {
+      const { id, ...data } = row
+      batch.set(doc(db, 'eventCategories', id), {
+        ...data,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    })
+  }
+
+  if (resourceSnapshot.empty || categorySnapshot.empty) await batch.commit()
+}
+
 export function subscribeResourceMasters(onChange: (resources: ResourceMasterRecord[]) => void): Unsubscribe {
   let unsubscribe: Unsubscribe = () => undefined
   let active = true

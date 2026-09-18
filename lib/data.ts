@@ -8,7 +8,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore'
-import { getDb } from './firebase'
+import { ensureSignedIn, getDb } from './firebase'
 
 export type CalendarEventInput = {
   title: string
@@ -43,8 +43,9 @@ export function overlaps(startA: string, endA: string, startB: string, endB: str
 }
 
 export async function checkReservationConflict(input: Pick<CalendarEventInput, 'resource' | 'date' | 'startTime' | 'endTime'>) {
+  const signedIn = await ensureSignedIn()
   const db = await getDb()
-  if (!db || !input.resource) return null
+  if (!signedIn || !db || !input.resource) return null
 
   const q = query(
     collection(db, 'reservations'),
@@ -64,8 +65,9 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     throw new Error('END_BEFORE_START')
   }
 
+  const signedIn = await ensureSignedIn()
   const db = await getDb()
-  if (!db) return { id: `demo-${Date.now()}`, demo: true as const }
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
 
   const conflict = await checkReservationConflict(input)
   if (conflict) throw new Error('RESERVATION_CONFLICT')
@@ -120,9 +122,9 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
   let unsubscribe: Unsubscribe = () => undefined
   let active = true
 
-  getDb().then((db) => {
+  Promise.all([ensureSignedIn(), getDb()]).then(([signedIn, db]) => {
     if (!active) return
-    if (!db) {
+    if (!signedIn || !db) {
       onChange([])
       return
     }
@@ -156,8 +158,9 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
 }
 
 export async function saveFeedback(input: FeedbackInput) {
+  const signedIn = await ensureSignedIn()
   const db = await getDb()
-  if (!db) return { id: `demo-${Date.now()}`, demo: true as const }
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),

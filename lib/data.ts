@@ -32,10 +32,19 @@ export type ResourceTypeRecord = {
   active: boolean
 }
 
+export type ManagementDivisionRecord = {
+  id: string
+  name: string
+  color: string
+  sortOrder: number
+  active: boolean
+}
+
 export type ResourceMasterRecord = {
   id: string
   name: string
   typeId: string
+  managementDivisionId: string
   color: string
   sortOrder: number
   active: boolean
@@ -141,7 +150,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.4.1',
+    version: '0.4.2',
   })
 
   const writes: Promise<unknown>[] = []
@@ -210,7 +219,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.4.1',
+    version: '0.4.2',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -267,7 +276,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.4.1',
+    version: '0.4.2',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -418,13 +427,29 @@ export async function ensureDefaultMasters() {
   const db = await getDb()
   if (!signedIn || !db) return
 
-  const [resourceTypeSnapshot, resourceSnapshot, categorySnapshot] = await Promise.all([
+  const [managementDivisionSnapshot, resourceTypeSnapshot, resourceSnapshot, categorySnapshot] = await Promise.all([
+    getDocs(collection(db, 'managementDivisions')),
     getDocs(collection(db, 'resourceTypes')),
     getDocs(collection(db, 'resourceMasters')),
     getDocs(collection(db, 'eventCategories')),
   ])
 
   const batch = writeBatch(db)
+
+  if (managementDivisionSnapshot.empty) {
+    const defaults: Array<{ id: string } & Omit<ManagementDivisionRecord, 'id'>> = [
+      { id: 'head_office', name: '本社', color: '#2563eb', sortOrder: 1, active: true },
+      { id: 'seal_engineering', name: 'シールエンジ', color: '#059669', sortOrder: 2, active: true },
+    ]
+    defaults.forEach((row) => {
+      const { id, ...data } = row
+      batch.set(doc(db, 'managementDivisions', id), {
+        ...data,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    })
+  }
 
   if (resourceTypeSnapshot.empty) {
     const defaults: Array<{ id: string } & Omit<ResourceTypeRecord, 'id'>> = [
@@ -445,9 +470,9 @@ export async function ensureDefaultMasters() {
 
   if (resourceSnapshot.empty) {
     const defaults: Array<Omit<ResourceMasterRecord, 'id'>> = [
-      { name: '第1会議室', typeId: 'meeting_room', color: '#2563eb', sortOrder: 1, active: true },
-      { name: '第2会議室', typeId: 'meeting_room', color: '#2563eb', sortOrder: 2, active: true },
-      { name: '社用車A', typeId: 'vehicle', color: '#059669', sortOrder: 1, active: true },
+      { name: '第1会議室', typeId: 'meeting_room', managementDivisionId: 'head_office', color: '#2563eb', sortOrder: 1, active: true },
+      { name: '第2会議室', typeId: 'meeting_room', managementDivisionId: 'head_office', color: '#2563eb', sortOrder: 2, active: true },
+      { name: '社用車A', typeId: 'vehicle', managementDivisionId: 'seal_engineering', color: '#059669', sortOrder: 1, active: true },
     ]
     defaults.forEach((row, index) => {
       batch.set(doc(db, 'resourceMasters', `default-resource-${index + 1}`), {
@@ -479,9 +504,70 @@ export async function ensureDefaultMasters() {
     })
   }
 
-  if (resourceTypeSnapshot.empty || resourceSnapshot.empty || categorySnapshot.empty) await batch.commit()
+  if (managementDivisionSnapshot.empty || resourceTypeSnapshot.empty || resourceSnapshot.empty || categorySnapshot.empty) await batch.commit()
 }
 
+
+
+export function subscribeManagementDivisions(onChange: (divisions: ManagementDivisionRecord[]) => void): Unsubscribe {
+  let unsubscribe: Unsubscribe = () => undefined
+  let active = true
+
+  Promise.all([ensureSignedIn(), getDb()]).then(([signedIn, db]) => {
+    if (!active) return
+    if (!signedIn || !db) {
+      onChange([])
+      return
+    }
+    unsubscribe = onSnapshot(collection(db, 'managementDivisions'), (snapshot) => {
+      const rows = snapshot.docs
+        .map((divisionDoc) => {
+          const data = divisionDoc.data() as Partial<Omit<ManagementDivisionRecord, 'id'>>
+          return {
+            id: divisionDoc.id,
+            name: data.name ?? '',
+            color: data.color ?? '#6b7280',
+            sortOrder: data.sortOrder ?? 999,
+            active: data.active ?? true,
+          }
+        })
+        .filter((row) => row.active)
+        .sort((a,b)=>a.sortOrder-b.sortOrder || a.name.localeCompare(b.name,'ja'))
+      onChange(rows)
+    })
+  })
+
+  return () => { active = false; unsubscribe() }
+}
+
+export async function saveManagementDivision(
+  input: Omit<ManagementDivisionRecord, 'id'>,
+  divisionId?: string,
+) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+  if (divisionId) {
+    await updateDoc(doc(db, 'managementDivisions', divisionId), { ...input, updatedAt: serverTimestamp() })
+    return divisionId
+  }
+  const ref = await addDoc(collection(db, 'managementDivisions'), {
+    ...input,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  return ref.id
+}
+
+export async function deactivateManagementDivision(divisionId: string) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+  await updateDoc(doc(db, 'managementDivisions', divisionId), {
+    active: false,
+    updatedAt: serverTimestamp(),
+  })
+}
 
 export function subscribeResourceTypes(onChange: (types: ResourceTypeRecord[]) => void): Unsubscribe {
   let unsubscribe: Unsubscribe = () => undefined
@@ -561,6 +647,7 @@ export function subscribeResourceMasters(onChange: (resources: ResourceMasterRec
             id: resourceDoc.id,
             name: data.name ?? '',
             typeId: data.typeId ?? '',
+            managementDivisionId: data.managementDivisionId ?? '',
             color: data.color ?? '#2463a8',
             sortOrder: data.sortOrder ?? 999,
             active: data.active ?? true,
@@ -671,7 +758,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.4.1',
+    appVersion: '0.4.2',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

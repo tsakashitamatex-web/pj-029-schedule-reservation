@@ -1,24 +1,43 @@
 import { getApps, initializeApp } from 'firebase/app'
-import { getFirestore } from 'firebase/firestore'
+import { getFirestore, type Firestore } from 'firebase/firestore'
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+export type RuntimeConfig = {
+  firebase: {
+    apiKey: string
+    authDomain: string
+    projectId: string
+    storageBucket: string
+    messagingSenderId: string
+    appId: string
+  }
+  teamsMeetingChatUrl: string
 }
 
-export const firebaseConfigured = Boolean(
-  firebaseConfig.apiKey &&
-    firebaseConfig.authDomain &&
-    firebaseConfig.projectId &&
-    firebaseConfig.appId,
-)
+let runtimeConfigPromise: Promise<RuntimeConfig> | null = null
+let dbPromise: Promise<Firestore | null> | null = null
 
-export const firebaseApp = firebaseConfigured
-  ? getApps()[0] ?? initializeApp(firebaseConfig)
-  : null
+export function getRuntimeConfig() {
+  if (!runtimeConfigPromise) {
+    runtimeConfigPromise = fetch('/api/runtime-config', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) throw new Error('RUNTIME_CONFIG_FETCH_FAILED')
+        return response.json() as Promise<RuntimeConfig>
+      })
+  }
+  return runtimeConfigPromise
+}
 
-export const db = firebaseApp ? getFirestore(firebaseApp) : null
+export function isFirebaseConfigValid(config: RuntimeConfig['firebase']) {
+  return Boolean(config.apiKey && config.authDomain && config.projectId && config.appId)
+}
+
+export function getDb() {
+  if (!dbPromise) {
+    dbPromise = getRuntimeConfig().then((runtime) => {
+      if (!isFirebaseConfigValid(runtime.firebase)) return null
+      const app = getApps()[0] ?? initializeApp(runtime.firebase)
+      return getFirestore(app)
+    })
+  }
+  return dbPromise
+}

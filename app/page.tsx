@@ -308,9 +308,11 @@ export default function Home(){
   }
 
   function eventPersonalStyle(event: UiEvent){
+    const participantId = event.participantIds?.[0]
+    const participantEmail = event.participantEmails?.[0]
     const employee =
-      (event.participantIds?.[0] && employees.find((item)=>item.id===event.participantIds[0])) ||
-      (event.participantEmails?.[0] && employees.find((item)=>item.email===event.participantEmails[0]))
+      (participantId ? employees.find((item)=>item.id===participantId) : undefined) ??
+      (participantEmail ? employees.find((item)=>item.email===participantEmail) : undefined)
     if (!employee?.color) return undefined
     return { borderLeftColor: employee.color, background: `${employee.color}20` }
   }

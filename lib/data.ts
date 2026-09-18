@@ -28,6 +28,8 @@ export type CalendarEventInput = {
   location: string
   description: string
   resource: string
+  meetingRoom: string
+  vehicle: string
   notifyEmail: boolean
   notifyTeams: boolean
 }
@@ -53,16 +55,17 @@ export function overlaps(startA: string, endA: string, startB: string, endB: str
 }
 
 export async function checkReservationConflict(
-  input: Pick<CalendarEventInput, 'resource' | 'date' | 'startTime' | 'endTime'>,
+  resourceName: string,
+  input: Pick<CalendarEventInput, 'date' | 'startTime' | 'endTime'>,
   excludeEventId?: string,
 ) {
   const signedIn = await ensureSignedIn()
   const db = await getDb()
-  if (!signedIn || !db || !input.resource) return null
+  if (!signedIn || !db || !resourceName) return null
 
   const q = query(
     collection(db, 'reservations'),
-    where('resourceName', '==', input.resource),
+    where('resourceName', '==', resourceName),
     where('date', '==', input.date),
   )
   const snapshot = await getDocs(q)
@@ -83,23 +86,28 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
   const db = await getDb()
   if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
 
-  const conflict = input.allDay ? null : await checkReservationConflict(input)
-  if (conflict) throw new Error('RESERVATION_CONFLICT')
+  const requestedResources = [input.meetingRoom, input.vehicle].filter(Boolean)
+  if (!input.allDay) {
+    for (const resourceName of requestedResources) {
+      const conflict = await checkReservationConflict(resourceName, input)
+      if (conflict) throw new Error(`RESERVATION_CONFLICT:${resourceName}`)
+    }
+  }
 
   const eventRef = await addDoc(collection(db, 'events'), {
     ...input,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.2.1',
+    version: '0.2.2',
   })
 
   const writes: Promise<unknown>[] = []
 
-  if (input.resource) {
+  for (const resourceName of requestedResources) {
     writes.push(addDoc(collection(db, 'reservations'), {
       eventId: eventRef.id,
-      resourceName: input.resource,
+      resourceName,
       date: input.date,
       startTime: input.startTime,
       endTime: input.endTime,
@@ -142,8 +150,13 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   const db = await getDb()
   if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
 
-  const conflict = input.allDay ? null : await checkReservationConflict(input, eventId)
-  if (conflict) throw new Error('RESERVATION_CONFLICT')
+  const requestedResources = [input.meetingRoom, input.vehicle].filter(Boolean)
+  if (!input.allDay) {
+    for (const resourceName of requestedResources) {
+      const conflict = await checkReservationConflict(resourceName, input, eventId)
+      if (conflict) throw new Error(`RESERVATION_CONFLICT:${resourceName}`)
+    }
+  }
 
   const reservationQuery = query(collection(db, 'reservations'), where('eventId', '==', eventId))
   const reservationSnapshot = await getDocs(reservationQuery)
@@ -157,11 +170,11 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
 
-  if (input.resource) {
+  for (const resourceName of requestedResources) {
     const reservationRef = doc(collection(db, 'reservations'))
     batch.set(reservationRef, {
       eventId,
-      resourceName: input.resource,
+      resourceName,
       date: input.date,
       startTime: input.startTime,
       endTime: input.endTime,
@@ -258,7 +271,9 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
         externalParticipants: data.externalParticipants ?? '',
         location: data.location ?? '',
         description: data.description ?? '',
-        resource: data.resource ?? '',
+        resource: data.resource ?? data.meetingRoom ?? data.vehicle ?? '',
+        meetingRoom: data.meetingRoom ?? (data.resource?.includes('会議室') ? data.resource : ''),
+        vehicle: data.vehicle ?? (data.resource?.includes('社用車') ? data.resource : ''),
         notifyEmail: data.notifyEmail ?? false,
         notifyTeams: data.notifyTeams ?? false,
         status: data.status,
@@ -281,7 +296,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.2.1',
+    appVersion: '0.2.2',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

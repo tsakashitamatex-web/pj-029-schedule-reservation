@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, saveCalendarEvent, saveEmployee, saveFeedback, subscribeCalendarEvents, subscribeEmployees, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord } from '../lib/data'
+import { cancelCalendarEvent, deactivateEmployee, saveCalendarEvent, saveEmployee, saveFeedback, subscribeCalendarEvents, subscribeEmployees, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
@@ -76,6 +76,7 @@ export default function Home(){
   const [employeeMasterOpen,setEmployeeMasterOpen]=useState(false)
   const [employeeState,setEmployeeState]=useState<'idle'|'saving'|'error'>('idle')
   const [employeeError,setEmployeeError]=useState('')
+  const [editingEmployee,setEditingEmployee]=useState<EmployeeRecord | null>(null)
   const [timeDragDate,setTimeDragDate]=useState<string | null>(null)
   const [timeDragStart,setTimeDragStart]=useState<string | null>(null)
   const [timeDragEnd,setTimeDragEnd]=useState<string | null>(null)
@@ -248,10 +249,13 @@ export default function Home(){
       await saveEmployee({
         name:String(form.get('employeeName')||''),
         email:String(form.get('employeeEmail')||''),
-        department:String(form.get('employeeDepartment')||''),
+        division:String(form.get('employeeDivision')||''),
+        group:String(form.get('employeeGroup')||''),
+        department:String(form.get('employeeGroup')||form.get('employeeDivision')||''),
         active:true,
-      })
+      }, editingEmployee?.id)
       formElement.reset()
+      setEditingEmployee(null)
       setEmployeeState('idle')
     }catch(err){
       const detail =
@@ -263,6 +267,22 @@ export default function Home(){
       setEmployeeError(detail)
       setEmployeeState('error')
       console.error('PJ-029 employee save failed', err)
+    }
+  }
+
+  function startEditEmployee(employee: EmployeeRecord){
+    setEditingEmployee(employee)
+    setEmployeeError('')
+  }
+
+  async function removeEmployee(employee: EmployeeRecord){
+    if (!window.confirm(`「${employee.name}」を社員マスタから削除しますか？`)) return
+    try{
+      await deactivateEmployee(employee.id)
+      if (editingEmployee?.id===employee.id) setEditingEmployee(null)
+    }catch(err){
+      setEmployeeError(err instanceof Error ? err.message : String(err))
+      setEmployeeState('error')
     }
   }
 
@@ -380,7 +400,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.3.0</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.3.1</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -556,15 +576,20 @@ export default function Home(){
 
     {employeeMasterOpen&&<div className="modal-backdrop" onMouseDown={()=>setEmployeeMasterOpen(false)}><div className="modal employee-master-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">氏名とメールアドレスを管理</div><h2>社員マスタ</h2></div><button className="icon-btn" type="button" onClick={()=>setEmployeeMasterOpen(false)}>×</button></div>
-      <form className="employee-master-form" onSubmit={submitEmployee}>
-        <input name="employeeName" required placeholder="氏名"/>
-        <input name="employeeEmail" type="email" required placeholder="メールアドレス"/>
-        <input name="employeeDepartment" placeholder="部署"/>
-        <button type="submit" className="btn primary" disabled={employeeState==='saving'}>{employeeState==='saving'?'登録中…':'社員を追加'}</button>
+      <form className="employee-master-form" onSubmit={submitEmployee} key={editingEmployee?.id||'new'}>
+        <input name="employeeName" required placeholder="氏名" defaultValue={editingEmployee?.name||''}/>
+        <input name="employeeEmail" type="email" required placeholder="メールアドレス" defaultValue={editingEmployee?.email||''}/>
+        <input name="employeeDivision" placeholder="ディビジョン" defaultValue={editingEmployee?.division||''}/>
+        <input name="employeeGroup" placeholder="グループ" defaultValue={editingEmployee?.group||editingEmployee?.department||''}/>
+        <button type="submit" className="btn primary" disabled={employeeState==='saving'}>{employeeState==='saving'?'保存中…':editingEmployee?'更新':'社員を追加'}</button>
+        {editingEmployee&&<button type="button" className="btn secondary" onClick={()=>setEditingEmployee(null)}>編集取消</button>}
       </form>
       {employeeState==='error'&&<div className="error">社員マスタの保存に失敗しました。<br/><small>エラー：{employeeError||'詳細不明'}</small></div>}
       <div className="employee-list master-list">
-        {employees.map((employee)=><div className="employee-row" key={employee.id}><span><strong>{employee.name}</strong><small>{employee.department||'部署未設定'}　{employee.email}</small></span></div>)}
+        {employees.map((employee)=><div className="employee-row master-row" key={employee.id}>
+          <span><strong>{employee.name}</strong><small>{[employee.division,employee.group].filter(Boolean).join(' / ')||employee.department||'所属未設定'}　{employee.email}</small></span>
+          <div className="employee-row-actions"><button type="button" className="btn secondary" onClick={()=>startEditEmployee(employee)}>修正</button><button type="button" className="btn danger" onClick={()=>removeEmployee(employee)}>削除</button></div>
+        </div>)}
       </div>
     </div></div>}
 
@@ -573,7 +598,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.3.0</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.3.1</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateResourceMaster, ensureDefaultMasters, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveResourceMaster, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeResourceMasters, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ResourceMasterRecord } from '../lib/data'
+import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
@@ -94,11 +94,14 @@ export default function Home(){
   const [employeeError,setEmployeeError]=useState('')
   const [editingEmployee,setEditingEmployee]=useState<EmployeeRecord | null>(null)
   const [resourceMasters,setResourceMasters]=useState<ResourceMasterRecord[]>([])
+  const [resourceTypes,setResourceTypes]=useState<ResourceTypeRecord[]>([])
   const [eventCategories,setEventCategories]=useState<EventCategoryRecord[]>([])
   const [masterOpen,setMasterOpen]=useState(false)
-  const [masterTab,setMasterTab]=useState<'resources'|'categories'>('resources')
+  const [masterTab,setMasterTab]=useState<'resources'|'resourceTypes'|'categories'>('resources')
   const [editingResource,setEditingResource]=useState<ResourceMasterRecord | null>(null)
+  const [editingResourceType,setEditingResourceType]=useState<ResourceTypeRecord | null>(null)
   const [editingCategory,setEditingCategory]=useState<EventCategoryRecord | null>(null)
+  const [selectedResourceIds,setSelectedResourceIds]=useState<string[]>([])
   const [masterState,setMasterState]=useState<'idle'|'saving'|'error'>('idle')
   const [masterError,setMasterError]=useState('')
   const [timeDragDate,setTimeDragDate]=useState<string | null>(null)
@@ -135,6 +138,7 @@ export default function Home(){
     ensureDefaultMasters().catch(()=>undefined)
     const stopEmployees = subscribeEmployees(setEmployees)
     const stopResources = subscribeResourceMasters(setResourceMasters)
+    const stopResourceTypes = subscribeResourceTypes(setResourceTypes)
     const stopCategories = subscribeEventCategories(setEventCategories)
 
     return ()=>{
@@ -142,6 +146,7 @@ export default function Home(){
       stop()
       stopEmployees()
       stopResources()
+      stopResourceTypes()
       stopCategories()
     }
   },[])
@@ -170,12 +175,22 @@ export default function Home(){
     )
   }, [employees, employeeSearch])
 
+  const resourceTypeOptions = useMemo(() => {
+    if (resourceTypes.length) return resourceTypes
+    return [
+      {id:'meeting_room',name:'会議室',color:'#2563eb',sortOrder:1,active:true},
+      {id:'vehicle',name:'車両',color:'#059669',sortOrder:2,active:true},
+      {id:'test_machine',name:'試験機',color:'#7c3aed',sortOrder:3,active:true},
+      {id:'other',name:'その他設備',color:'#6b7280',sortOrder:99,active:true},
+    ]
+  }, [resourceTypes])
+
   const resourceOptions = useMemo(() => {
     if (resourceMasters.length) return resourceMasters
     return [
-      {id:'room1',name:'第1会議室',kind:'meeting_room' as const,color:'#2563eb',sortOrder:1,active:true},
-      {id:'room2',name:'第2会議室',kind:'meeting_room' as const,color:'#2563eb',sortOrder:2,active:true},
-      {id:'carA',name:'社用車A',kind:'vehicle' as const,color:'#059669',sortOrder:1,active:true},
+      {id:'room1',name:'第1会議室',typeId:'meeting_room',color:'#2563eb',sortOrder:1,active:true},
+      {id:'room2',name:'第2会議室',typeId:'meeting_room',color:'#2563eb',sortOrder:2,active:true},
+      {id:'carA',name:'社用車A',typeId:'vehicle',color:'#059669',sortOrder:1,active:true},
     ]
   }, [resourceMasters])
 
@@ -208,6 +223,7 @@ export default function Home(){
     setEventError('')
     setEditingEvent(null)
     setSelectedEmployeeIds([])
+    setSelectedResourceIds([])
     setEventOpen(true)
     requestAnimationFrame(()=>{
       const timeInput=document.querySelector<HTMLInputElement>('input[name="startTime"]')
@@ -290,6 +306,10 @@ export default function Home(){
     setSelectedEmployeeIds((prev)=>prev.includes(id)?prev.filter((x)=>x!==id):[...prev,id])
   }
 
+  function toggleResource(id:string){
+    setSelectedResourceIds((prev)=>prev.includes(id)?prev.filter((x)=>x!==id):[...prev,id])
+  }
+
   async function submitEmployee(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
     const formElement=e.currentTarget
@@ -356,12 +376,28 @@ export default function Home(){
     try{
       await saveResourceMaster({
         name:String(form.get('resourceName')||''),
-        kind:String(form.get('resourceKind')||'meeting_room') as 'meeting_room'|'vehicle',
+        typeId:String(form.get('resourceTypeId')||resourceTypeOptions[0]?.id||'other'),
         color:String(form.get('resourceColor')||'#2463a8'),
         sortOrder:Number(form.get('resourceSortOrder')||999),
         active:true,
       }, editingResource?.id)
       setEditingResource(null); formElement.reset(); setMasterState('idle')
+    }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
+  }
+
+  async function submitResourceType(e:FormEvent<HTMLFormElement>){
+    e.preventDefault()
+    const formElement=e.currentTarget
+    setMasterState('saving'); setMasterError('')
+    const form=new FormData(formElement)
+    try{
+      await saveResourceType({
+        name:String(form.get('resourceTypeName')||''),
+        color:String(form.get('resourceTypeColor')||'#6b7280'),
+        sortOrder:Number(form.get('resourceTypeSortOrder')||999),
+        active:true,
+      }, editingResourceType?.id)
+      setEditingResourceType(null); formElement.reset(); setMasterState('idle')
     }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
   }
 
@@ -385,6 +421,17 @@ export default function Home(){
     if(!window.confirm(`「${row.name}」を削除しますか？`)) return
     await deactivateResourceMaster(row.id)
     if(editingResource?.id===row.id) setEditingResource(null)
+  }
+
+  async function removeResourceType(row:ResourceTypeRecord){
+    if(resourceOptions.some((resource)=>resource.typeId===row.id)){
+      setMasterError('この種別を使用している設備があります。先に設備の種別を変更してください。')
+      setMasterState('error')
+      return
+    }
+    if(!window.confirm(`「${row.name}」を削除しますか？`)) return
+    await deactivateResourceType(row.id)
+    if(editingResourceType?.id===row.id) setEditingResourceType(null)
   }
 
   async function removeEventCategory(row:EventCategoryRecord){
@@ -420,6 +467,11 @@ export default function Home(){
       event.participantIds?.length
         ? event.participantIds
         : employees.filter((employee)=>event.participantEmails?.includes(employee.email)).map((employee)=>employee.id)
+    )
+    setSelectedResourceIds(
+      event.resourceIds?.length
+        ? event.resourceIds
+        : resourceOptions.filter((resource)=>event.resourceNames?.includes(resource.name) || event.meetingRoom===resource.name || event.vehicle===resource.name).map((resource)=>resource.id)
     )
     setEventOpen(true)
   }
@@ -459,9 +511,11 @@ export default function Home(){
       externalParticipants:String(form.get('externalParticipants')||''),
       location:String(form.get('location')||''),
       description:String(form.get('description')||''),
-      resource:String(form.get('meetingRoom')||form.get('vehicle')||''),
-      meetingRoom:String(form.get('meetingRoom')||''),
-      vehicle:String(form.get('vehicle')||''),
+      resource:resourceOptions.filter((row)=>selectedResourceIds.includes(row.id)).map((row)=>row.name).join('、'),
+      resourceIds:selectedResourceIds,
+      resourceNames:resourceOptions.filter((row)=>selectedResourceIds.includes(row.id)).map((row)=>row.name),
+      meetingRoom:resourceOptions.find((row)=>selectedResourceIds.includes(row.id) && row.typeId==='meeting_room')?.name||'',
+      vehicle:resourceOptions.find((row)=>selectedResourceIds.includes(row.id) && row.typeId==='vehicle')?.name||'',
       notifyEmail:form.get('notifyEmail')==='on',
       notifyTeams:form.get('notifyTeams')==='on',
     }
@@ -516,13 +570,13 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.4.0</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.4.1</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
         <button className="btn secondary" type="button" onClick={()=>setEmployeeMasterOpen(true)}>社員マスタ</button>
         <button className="btn secondary" type="button" onClick={()=>setMasterOpen(true)}>各種マスタ</button>
-        <button className="btn secondary" type="button" onClick={()=>setNotice('設備予約は通常の予定登録画面から行います。')}>設備予約</button>
+        <button className="btn secondary" type="button" onClick={()=>setNotice('設備・リソース予約は通常の予定登録画面から行います。')}>設備・リソース</button>
         <button className="btn primary" type="button" onClick={()=>openNewEvent()}>＋ 予定を作成</button>
       </div>
     </header>
@@ -626,7 +680,7 @@ export default function Home(){
         <div><span>場所</span><strong>{selectedEvent.location||'未設定'}</strong></div>
         <div><span>社内参加者</span><strong>{selectedEvent.participants||'未設定'}</strong></div>
         <div><span>外部参加者・来訪者</span><strong>{selectedEvent.externalParticipants||'なし'}</strong></div>
-        <div><span>会議室</span><strong>{selectedEvent.meetingRoom||((selectedEvent.resource||'').includes('会議室')?selectedEvent.resource:'なし')}</strong></div><div><span>社用車</span><strong>{selectedEvent.vehicle||((selectedEvent.resource||'').includes('社用車')?selectedEvent.resource:'なし')}</strong></div>
+        <div><span>予約設備・リソース</span><strong>{selectedEvent.resourceNames?.length?selectedEvent.resourceNames.join('、'):selectedEvent.resource||'なし'}</strong></div>
         <div><span>公開範囲</span><strong>{scopeLabels[selectedEvent.scope]}</strong></div>
       </div>
       {selectedEvent.description&&<div className="detail-description"><span>詳細</span><p>{selectedEvent.description}</p></div>}
@@ -639,7 +693,7 @@ export default function Home(){
     <button className="feedback-fab" type="button" onClick={()=>{setFeedbackOpen(true);setFeedbackState('idle')}}>フィードバック</button>
 
     {eventOpen&&<div className="modal-backdrop" onMouseDown={()=>setEventOpen(false)}><div className="modal schedule-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
-      <div className="modal-head"><div><div className="eyebrow">会社予定・個人予定・設備予約</div><h2>{editingEvent?'予定を編集':'予定を作成'}</h2></div><button className="icon-btn" type="button" onClick={()=>setEventOpen(false)}>×</button></div>
+      <div className="modal-head"><div><div className="eyebrow">会社予定・個人予定・設備／リソース予約</div><h2>{editingEvent?'予定を編集':'予定を作成'}</h2></div><button className="icon-btn" type="button" onClick={()=>setEventOpen(false)}>×</button></div>
       {eventState==='sent'?<div className="success">予定を登録しました。<div className="modal-actions"><button type="button" className="btn primary" onClick={()=>setEventOpen(false)}>閉じる</button></div></div>:<form onSubmit={submitEvent}>
         <label className="field">タイトル<input name="title" required placeholder="例：姫路出張、○○工場定修工事、ABC社打合せ" defaultValue={editingEvent?.title||''}/></label>
         <div className="form-grid two"><label className="field">予定種別<select name="category" defaultValue={editingEvent?.category||categoryOptions[0]?.id||"meeting"}>{categoryOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select></label><label className="field">公開範囲<select name="scope" defaultValue={editingEvent?.scope||"personal"}><option value="personal">個人</option><option value="department">部署</option><option value="company">全社</option></select></label></div>
@@ -657,17 +711,19 @@ export default function Home(){
           </div>
         </div>
         <label className="field">外部参加者・来訪者<input name="externalParticipants" placeholder="例：ABC社 田中様" defaultValue={editingEvent?.externalParticipants||''}/></label>
-        <div className="form-grid two">
-          <label className="field">会議室（必要な場合のみ）
-            <select name="meetingRoom" defaultValue={editingEvent?.meetingRoom||((editingEvent?.resource||'').includes('会議室')?editingEvent?.resource:'')}>
-              <option value="">使用しない</option>{resourceOptions.filter(r=>r.kind==='meeting_room').map(r=><option value={r.name} key={r.id}>{r.name}</option>)}
-            </select>
-          </label>
-          <label className="field">社用車（必要な場合のみ）
-            <select name="vehicle" defaultValue={editingEvent?.vehicle||((editingEvent?.resource||'').includes('社用車')?editingEvent?.resource:'')}>
-              <option value="">使用しない</option>{resourceOptions.filter(r=>r.kind==='vehicle').map(r=><option value={r.name} key={r.id}>{r.name}</option>)}
-            </select>
-          </label>
+        <div className="field">
+          <span>設備・リソース予約（必要な場合のみ）</span>
+          <div className="resource-picker">
+            {resourceTypeOptions.map((type)=>{
+              const rows=resourceOptions.filter((row)=>row.typeId===type.id)
+              if(!rows.length) return null
+              return <div className="resource-group" key={type.id}>
+                <strong><i className="employee-color-dot" style={{background:type.color}}/> {type.name}</strong>
+                <div className="resource-checks">{rows.map((row)=><label key={row.id}><input type="checkbox" checked={selectedResourceIds.includes(row.id)} onChange={()=>toggleResource(row.id)}/><span>{row.name}</span></label>)}</div>
+              </div>
+            })}
+            {resourceOptions.length===0&&<div className="empty-panel">設備・リソースが未登録です。</div>}
+          </div>
         </div>
         <label className="field">詳細<textarea name="description" rows={3} placeholder="目的、工事内容、訪問先、連絡事項など" defaultValue={editingEvent?.description||''}/></label>
         <div className="check-row"><label><input name="notifyEmail" type="checkbox" defaultChecked={editingEvent?.notifyEmail||false}/> 選択した社内参加者へメール通知</label><label><input name="notifyTeams" type="checkbox" defaultChecked={editingEvent?.notifyTeams||false}/> Teams通知（来客会議室予約）</label></div>
@@ -715,19 +771,30 @@ export default function Home(){
     {masterOpen&&<div className="modal-backdrop" onMouseDown={()=>setMasterOpen(false)}><div className="modal master-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">予約アプリ方式のマスタ管理</div><h2>各種マスタ</h2></div><button className="icon-btn" type="button" onClick={()=>setMasterOpen(false)}>×</button></div>
       <div className="view-tabs master-tabs">
-        <button type="button" className={masterTab==='resources'?'active':''} onClick={()=>setMasterTab('resources')}>会議室・社用車</button>
+        <button type="button" className={masterTab==='resources'?'active':''} onClick={()=>setMasterTab('resources')}>設備・リソース</button>
+        <button type="button" className={masterTab==='resourceTypes'?'active':''} onClick={()=>setMasterTab('resourceTypes')}>リソース種別</button>
         <button type="button" className={masterTab==='categories'?'active':''} onClick={()=>setMasterTab('categories')}>予定種別</button>
       </div>
       {masterTab==='resources'&&<>
         <form className="master-form" onSubmit={submitResourceMaster} key={editingResource?.id||'new-resource'}>
           <input name="resourceName" required placeholder="名称" defaultValue={editingResource?.name||''}/>
-          <select name="resourceKind" defaultValue={editingResource?.kind||'meeting_room'}><option value="meeting_room">会議室</option><option value="vehicle">社用車</option></select>
+          <select name="resourceTypeId" defaultValue={editingResource?.typeId||resourceTypeOptions[0]?.id||''}>{resourceTypeOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select>
           <input name="resourceSortOrder" type="number" min="0" placeholder="表示順" defaultValue={editingResource?.sortOrder??999}/>
           <input name="resourceColor" type="color" defaultValue={editingResource?.color||'#2463a8'}/>
           <button className="btn primary" type="submit">{editingResource?'更新':'追加'}</button>
           {editingResource&&<button className="btn secondary" type="button" onClick={()=>setEditingResource(null)}>取消</button>}
         </form>
-        <div className="master-list">{resourceOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>{row.kind==='meeting_room'?'会議室':'社用車'} / 表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingResource(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeResourceMaster(row)}>削除</button></div></div>)}</div>
+        <div className="master-list">{resourceOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>{resourceTypeOptions.find((type)=>type.id===row.typeId)?.name||'種別未設定'} / 表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingResource(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeResourceMaster(row)}>削除</button></div></div>)}</div>
+      </>}
+      {masterTab==='resourceTypes'&&<>
+        <form className="master-form" onSubmit={submitResourceType} key={editingResourceType?.id||'new-resource-type'}>
+          <input name="resourceTypeName" required placeholder="種別名（例：試験機）" defaultValue={editingResourceType?.name||''}/>
+          <input name="resourceTypeSortOrder" type="number" min="0" placeholder="表示順" defaultValue={editingResourceType?.sortOrder??999}/>
+          <input name="resourceTypeColor" type="color" defaultValue={editingResourceType?.color||'#6b7280'}/>
+          <button className="btn primary" type="submit">{editingResourceType?'更新':'追加'}</button>
+          {editingResourceType&&<button className="btn secondary" type="button" onClick={()=>setEditingResourceType(null)}>取消</button>}
+        </form>
+        <div className="master-list">{resourceTypeOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingResourceType(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeResourceType(row)}>削除</button></div></div>)}</div>
       </>}
       {masterTab==='categories'&&<>
         <form className="master-form" onSubmit={submitEventCategory} key={editingCategory?.id||'new-category'}>
@@ -747,7 +814,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.0</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.1</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

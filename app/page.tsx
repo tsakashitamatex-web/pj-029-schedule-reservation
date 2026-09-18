@@ -75,6 +75,7 @@ export default function Home(){
   const [employeeSearch,setEmployeeSearch]=useState('')
   const [employeeMasterOpen,setEmployeeMasterOpen]=useState(false)
   const [employeeState,setEmployeeState]=useState<'idle'|'saving'|'error'>('idle')
+  const [employeeError,setEmployeeError]=useState('')
   const [timeDragDate,setTimeDragDate]=useState<string | null>(null)
   const [timeDragStart,setTimeDragStart]=useState<string | null>(null)
   const [timeDragEnd,setTimeDragEnd]=useState<string | null>(null)
@@ -240,6 +241,7 @@ export default function Home(){
   async function submitEmployee(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
     setEmployeeState('saving')
+    setEmployeeError('')
     const form=new FormData(e.currentTarget)
     try{
       await saveEmployee({
@@ -250,8 +252,16 @@ export default function Home(){
       })
       e.currentTarget.reset()
       setEmployeeState('idle')
-    }catch{
+    }catch(err){
+      const detail =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err && 'code' in err
+            ? String((err as { code?: unknown }).code ?? 'UNKNOWN_ERROR')
+            : String(err)
+      setEmployeeError(detail)
       setEmployeeState('error')
+      console.error('PJ-029 employee save failed', err)
     }
   }
 
@@ -551,7 +561,7 @@ export default function Home(){
         <input name="employeeDepartment" placeholder="部署"/>
         <button type="submit" className="btn primary" disabled={employeeState==='saving'}>{employeeState==='saving'?'登録中…':'社員を追加'}</button>
       </form>
-      {employeeState==='error'&&<div className="error">社員マスタの保存に失敗しました。</div>}
+      {employeeState==='error'&&<div className="error">社員マスタの保存に失敗しました。<br/><small>エラー：{employeeError||'詳細不明'}</small></div>}
       <div className="employee-list master-list">
         {employees.map((employee)=><div className="employee-row" key={employee.id}><span><strong>{employee.name}</strong><small>{employee.department||'部署未設定'}　{employee.email}</small></span></div>)}
       </div>

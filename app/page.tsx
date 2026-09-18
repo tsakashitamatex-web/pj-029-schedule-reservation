@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateResourceMaster, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveResourceMaster, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeResourceMasters, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ResourceMasterRecord } from '../lib/data'
+import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateResourceMaster, ensureDefaultMasters, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveResourceMaster, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeResourceMasters, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ResourceMasterRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
@@ -25,7 +25,7 @@ const scopeLabels: Record<CalendarEventInput['scope'], string> = {
   company: '全社',
 }
 
-const times = ['9:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00']
+const times = Array.from({length:24},(_,i)=>{ const mins=8*60+i*30; return `${pad(Math.floor(mins/60))}:${pad(mins%60)}` })
 const jpDays = ['日','月','火','水','木','金','土']
 const COMPANY_HOLIDAYS_2026 = new Set([
   '2026-05-04','2026-05-05','2026-05-06',
@@ -132,6 +132,7 @@ export default function Home(){
         setLoadState('デモ')
       })
 
+    ensureDefaultMasters().catch(()=>undefined)
     const stopEmployees = subscribeEmployees(setEmployees)
     const stopResources = subscribeResourceMasters(setResourceMasters)
     const stopCategories = subscribeEventCategories(setEventCategories)
@@ -147,7 +148,7 @@ export default function Home(){
 
   const selected=dateFromKey(selectedDate)
   const weekStart=startOfWeek(selected)
-  const weekDays=Array.from({length:5},(_,i)=>addDays(weekStart,i))
+  const weekDays=Array.from({length:7},(_,i)=>addDays(weekStart,i))
   const monthGridStart=startOfWeek(new Date(selected.getFullYear(),selected.getMonth(),1))
   const monthDays=Array.from({length:42},(_,i)=>addDays(monthGridStart,i))
   const connectionText=useMemo(()=>firebaseConfigured?`Firestore ${loadState}`:loadState==='確認中'?'接続確認中':'デモモード：Firebase設定待ち',[firebaseConfigured,loadState])
@@ -271,7 +272,11 @@ export default function Home(){
     openNewEvent(date,start,date,false)
     requestAnimationFrame(()=>{
       const endTimeInput=document.querySelector<HTMLInputElement>('input[name="endTime"]')
-      if(endTimeInput) endTimeInput.value=addOneHour(last)
+      if(endTimeInput){
+        const [h,m]=last.split(':').map(Number)
+        const total=Math.min(h*60+m+30,23*60+59)
+        endTimeInput.value=`${pad(Math.floor(total/60))}:${pad(total%60)}`
+      }
     })
   }
 
@@ -340,7 +345,7 @@ export default function Home(){
       (participantId ? employees.find((item)=>item.id===participantId) : undefined) ??
       (participantEmail ? employees.find((item)=>item.email===participantEmail) : undefined)
     if (!employee?.color) return undefined
-    return { borderLeftColor: employee.color, background: `${employee.color}20` }
+    return { borderLeftColor: employee.color }
   }
 
   async function submitResourceMaster(e:FormEvent<HTMLFormElement>){
@@ -527,7 +532,7 @@ export default function Home(){
         <button className="icon-btn" type="button" onClick={()=>move(-1)}>‹</button>
         <button className="btn secondary" type="button" onClick={()=>setSelectedDate(todayKey())}>今日</button>
         <button className="icon-btn" type="button" onClick={()=>move(1)}>›</button>
-        <strong>{viewMode==='month'?`${selected.getFullYear()}年${selected.getMonth()+1}月`:viewMode==='week'?`${weekDays[0].getMonth()+1}/${weekDays[0].getDate()}〜${weekDays[4].getMonth()+1}/${weekDays[4].getDate()}`:`${selected.getFullYear()}年${selected.getMonth()+1}月${selected.getDate()}日`}</strong>
+        <strong>{viewMode==='month'?`${selected.getFullYear()}年${selected.getMonth()+1}月`:viewMode==='week'?`${weekDays[0].getMonth()+1}/${weekDays[0].getDate()}〜${weekDays[6].getMonth()+1}/${weekDays[6].getDate()}`:`${selected.getFullYear()}年${selected.getMonth()+1}月${selected.getDate()}日`}</strong>
       </div>
       <div className="view-tabs">
         {(['month','week','day'] as ViewMode[]).map(v=><button key={v} type="button" className={viewMode===v?'active':''} onClick={()=>setViewMode(v)}>{v==='month'?'月':v==='week'?'週':'日'}</button>)}

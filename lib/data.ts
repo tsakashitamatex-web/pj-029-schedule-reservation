@@ -24,10 +24,18 @@ export type EmployeeRecord = {
   active: boolean
 }
 
+export type ResourceTypeRecord = {
+  id: string
+  name: string
+  color: string
+  sortOrder: number
+  active: boolean
+}
+
 export type ResourceMasterRecord = {
   id: string
   name: string
-  kind: 'meeting_room' | 'vehicle'
+  typeId: string
   color: string
   sortOrder: number
   active: boolean
@@ -58,6 +66,8 @@ export type CalendarEventInput = {
   location: string
   description: string
   resource: string
+  resourceIds: string[]
+  resourceNames: string[]
   meetingRoom: string
   vehicle: string
   notifyEmail: boolean
@@ -116,7 +126,9 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
   const db = await getDb()
   if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
 
-  const requestedResources = [input.meetingRoom, input.vehicle].filter(Boolean)
+  const requestedResources = input.resourceNames?.length
+    ? input.resourceNames.filter(Boolean)
+    : [input.meetingRoom, input.vehicle].filter(Boolean)
   if (!input.allDay) {
     for (const resourceName of requestedResources) {
       const conflict = await checkReservationConflict(resourceName, input)
@@ -129,7 +141,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.4.0',
+    version: '0.4.1',
   })
 
   const writes: Promise<unknown>[] = []
@@ -181,7 +193,9 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   const db = await getDb()
   if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
 
-  const requestedResources = [input.meetingRoom, input.vehicle].filter(Boolean)
+  const requestedResources = input.resourceNames?.length
+    ? input.resourceNames.filter(Boolean)
+    : [input.meetingRoom, input.vehicle].filter(Boolean)
   if (!input.allDay) {
     for (const resourceName of requestedResources) {
       const conflict = await checkReservationConflict(resourceName, input, eventId)
@@ -196,7 +210,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.4.0',
+    version: '0.4.1',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -253,7 +267,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.4.0',
+    version: '0.4.1',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -305,9 +319,11 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
         externalParticipants: data.externalParticipants ?? '',
         location: data.location ?? '',
         description: data.description ?? '',
-        resource: data.resource ?? data.meetingRoom ?? data.vehicle ?? '',
-        meetingRoom: data.meetingRoom ?? (data.resource?.includes('会議室') ? data.resource : ''),
-        vehicle: data.vehicle ?? (data.resource?.includes('社用車') ? data.resource : ''),
+        resource: data.resource ?? data.resourceNames?.join('、') ?? data.meetingRoom ?? data.vehicle ?? '',
+        resourceIds: data.resourceIds ?? [],
+        resourceNames: data.resourceNames ?? [data.meetingRoom, data.vehicle].filter((v): v is string => Boolean(v)),
+        meetingRoom: data.meetingRoom ?? '',
+        vehicle: data.vehicle ?? '',
         notifyEmail: data.notifyEmail ?? false,
         notifyTeams: data.notifyTeams ?? false,
         status: data.status,
@@ -402,18 +418,36 @@ export async function ensureDefaultMasters() {
   const db = await getDb()
   if (!signedIn || !db) return
 
-  const [resourceSnapshot, categorySnapshot] = await Promise.all([
+  const [resourceTypeSnapshot, resourceSnapshot, categorySnapshot] = await Promise.all([
+    getDocs(collection(db, 'resourceTypes')),
     getDocs(collection(db, 'resourceMasters')),
     getDocs(collection(db, 'eventCategories')),
   ])
 
   const batch = writeBatch(db)
 
+  if (resourceTypeSnapshot.empty) {
+    const defaults: Array<{ id: string } & Omit<ResourceTypeRecord, 'id'>> = [
+      { id: 'meeting_room', name: '会議室', color: '#2563eb', sortOrder: 1, active: true },
+      { id: 'vehicle', name: '車両', color: '#059669', sortOrder: 2, active: true },
+      { id: 'test_machine', name: '試験機', color: '#7c3aed', sortOrder: 3, active: true },
+      { id: 'other', name: 'その他設備', color: '#6b7280', sortOrder: 99, active: true },
+    ]
+    defaults.forEach((row) => {
+      const { id, ...data } = row
+      batch.set(doc(db, 'resourceTypes', id), {
+        ...data,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    })
+  }
+
   if (resourceSnapshot.empty) {
     const defaults: Array<Omit<ResourceMasterRecord, 'id'>> = [
-      { name: '第1会議室', kind: 'meeting_room', color: '#2563eb', sortOrder: 1, active: true },
-      { name: '第2会議室', kind: 'meeting_room', color: '#2563eb', sortOrder: 2, active: true },
-      { name: '社用車A', kind: 'vehicle', color: '#059669', sortOrder: 1, active: true },
+      { name: '第1会議室', typeId: 'meeting_room', color: '#2563eb', sortOrder: 1, active: true },
+      { name: '第2会議室', typeId: 'meeting_room', color: '#2563eb', sortOrder: 2, active: true },
+      { name: '社用車A', typeId: 'vehicle', color: '#059669', sortOrder: 1, active: true },
     ]
     defaults.forEach((row, index) => {
       batch.set(doc(db, 'resourceMasters', `default-resource-${index + 1}`), {
@@ -445,7 +479,68 @@ export async function ensureDefaultMasters() {
     })
   }
 
-  if (resourceSnapshot.empty || categorySnapshot.empty) await batch.commit()
+  if (resourceTypeSnapshot.empty || resourceSnapshot.empty || categorySnapshot.empty) await batch.commit()
+}
+
+
+export function subscribeResourceTypes(onChange: (types: ResourceTypeRecord[]) => void): Unsubscribe {
+  let unsubscribe: Unsubscribe = () => undefined
+  let active = true
+
+  Promise.all([ensureSignedIn(), getDb()]).then(([signedIn, db]) => {
+    if (!active) return
+    if (!signedIn || !db) {
+      onChange([])
+      return
+    }
+    unsubscribe = onSnapshot(collection(db, 'resourceTypes'), (snapshot) => {
+      const rows = snapshot.docs
+        .map((typeDoc) => {
+          const data = typeDoc.data() as Partial<Omit<ResourceTypeRecord, 'id'>>
+          return {
+            id: typeDoc.id,
+            name: data.name ?? '',
+            color: data.color ?? '#6b7280',
+            sortOrder: data.sortOrder ?? 999,
+            active: data.active ?? true,
+          }
+        })
+        .filter((row) => row.active)
+        .sort((a,b)=>a.sortOrder-b.sortOrder || a.name.localeCompare(b.name,'ja'))
+      onChange(rows)
+    })
+  })
+
+  return () => { active = false; unsubscribe() }
+}
+
+export async function saveResourceType(
+  input: Omit<ResourceTypeRecord, 'id'>,
+  typeId?: string,
+) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+  if (typeId) {
+    await updateDoc(doc(db, 'resourceTypes', typeId), { ...input, updatedAt: serverTimestamp() })
+    return typeId
+  }
+  const ref = await addDoc(collection(db, 'resourceTypes'), {
+    ...input,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  return ref.id
+}
+
+export async function deactivateResourceType(typeId: string) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+  await updateDoc(doc(db, 'resourceTypes', typeId), {
+    active: false,
+    updatedAt: serverTimestamp(),
+  })
 }
 
 export function subscribeResourceMasters(onChange: (resources: ResourceMasterRecord[]) => void): Unsubscribe {
@@ -465,7 +560,7 @@ export function subscribeResourceMasters(onChange: (resources: ResourceMasterRec
           return {
             id: resourceDoc.id,
             name: data.name ?? '',
-            kind: data.kind === 'vehicle' ? 'vehicle' as const : 'meeting_room' as const,
+            typeId: data.typeId ?? '',
             color: data.color ?? '#2463a8',
             sortOrder: data.sortOrder ?? 999,
             active: data.active ?? true,
@@ -576,7 +671,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.4.0',
+    appVersion: '0.4.1',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

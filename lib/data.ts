@@ -129,11 +129,22 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
 
     const q = query(collection(db, 'events'), where('status', '==', 'active'))
     unsubscribe = onSnapshot(q, (snapshot) => {
-    const events = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      externalParticipants: '',
-      ...(doc.data() as CalendarEventInput & { status?: string }),
-    }))
+    const events = snapshot.docs.map((doc) => {
+      const data = doc.data() as Partial<CalendarEventInput> & { status?: string }
+      return {
+        id: doc.id,
+        title: data.title ?? '',
+        date: data.date ?? '',
+        startTime: data.startTime ?? '',
+        endTime: data.endTime ?? '',
+        participants: data.participants ?? '',
+        externalParticipants: data.externalParticipants ?? '',
+        resource: data.resource ?? '',
+        notifyEmail: data.notifyEmail ?? false,
+        notifyTeams: data.notifyTeams ?? false,
+        status: data.status,
+      }
+    })
     onChange(events)
     })
   })

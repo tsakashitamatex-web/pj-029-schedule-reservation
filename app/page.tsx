@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
+import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
@@ -95,11 +95,13 @@ export default function Home(){
   const [editingEmployee,setEditingEmployee]=useState<EmployeeRecord | null>(null)
   const [resourceMasters,setResourceMasters]=useState<ResourceMasterRecord[]>([])
   const [resourceTypes,setResourceTypes]=useState<ResourceTypeRecord[]>([])
+  const [managementDivisions,setManagementDivisions]=useState<ManagementDivisionRecord[]>([])
   const [eventCategories,setEventCategories]=useState<EventCategoryRecord[]>([])
   const [masterOpen,setMasterOpen]=useState(false)
-  const [masterTab,setMasterTab]=useState<'resources'|'resourceTypes'|'categories'>('resources')
+  const [masterTab,setMasterTab]=useState<'resources'|'resourceTypes'|'managementDivisions'|'categories'>('resources')
   const [editingResource,setEditingResource]=useState<ResourceMasterRecord | null>(null)
   const [editingResourceType,setEditingResourceType]=useState<ResourceTypeRecord | null>(null)
+  const [editingManagementDivision,setEditingManagementDivision]=useState<ManagementDivisionRecord | null>(null)
   const [editingCategory,setEditingCategory]=useState<EventCategoryRecord | null>(null)
   const [selectedResourceIds,setSelectedResourceIds]=useState<string[]>([])
   const [masterState,setMasterState]=useState<'idle'|'saving'|'error'>('idle')
@@ -139,6 +141,7 @@ export default function Home(){
     const stopEmployees = subscribeEmployees(setEmployees)
     const stopResources = subscribeResourceMasters(setResourceMasters)
     const stopResourceTypes = subscribeResourceTypes(setResourceTypes)
+    const stopManagementDivisions = subscribeManagementDivisions(setManagementDivisions)
     const stopCategories = subscribeEventCategories(setEventCategories)
 
     return ()=>{
@@ -147,6 +150,7 @@ export default function Home(){
       stopEmployees()
       stopResources()
       stopResourceTypes()
+      stopManagementDivisions()
       stopCategories()
     }
   },[])
@@ -175,6 +179,14 @@ export default function Home(){
     )
   }, [employees, employeeSearch])
 
+  const managementDivisionOptions = useMemo(() => {
+    if (managementDivisions.length) return managementDivisions
+    return [
+      {id:'head_office',name:'本社',color:'#2563eb',sortOrder:1,active:true},
+      {id:'seal_engineering',name:'シールエンジ',color:'#059669',sortOrder:2,active:true},
+    ]
+  }, [managementDivisions])
+
   const resourceTypeOptions = useMemo(() => {
     if (resourceTypes.length) return resourceTypes
     return [
@@ -188,9 +200,9 @@ export default function Home(){
   const resourceOptions = useMemo(() => {
     if (resourceMasters.length) return resourceMasters
     return [
-      {id:'room1',name:'第1会議室',typeId:'meeting_room',color:'#2563eb',sortOrder:1,active:true},
-      {id:'room2',name:'第2会議室',typeId:'meeting_room',color:'#2563eb',sortOrder:2,active:true},
-      {id:'carA',name:'社用車A',typeId:'vehicle',color:'#059669',sortOrder:1,active:true},
+      {id:'room1',name:'第1会議室',typeId:'meeting_room',managementDivisionId:'head_office',color:'#2563eb',sortOrder:1,active:true},
+      {id:'room2',name:'第2会議室',typeId:'meeting_room',managementDivisionId:'head_office',color:'#2563eb',sortOrder:2,active:true},
+      {id:'carA',name:'社用車A',typeId:'vehicle',managementDivisionId:'seal_engineering',color:'#059669',sortOrder:1,active:true},
     ]
   }, [resourceMasters])
 
@@ -377,6 +389,7 @@ export default function Home(){
       await saveResourceMaster({
         name:String(form.get('resourceName')||''),
         typeId:String(form.get('resourceTypeId')||resourceTypeOptions[0]?.id||'other'),
+        managementDivisionId:String(form.get('managementDivisionId')||managementDivisionOptions[0]?.id||''),
         color:String(form.get('resourceColor')||'#2463a8'),
         sortOrder:Number(form.get('resourceSortOrder')||999),
         active:true,
@@ -398,6 +411,22 @@ export default function Home(){
         active:true,
       }, editingResourceType?.id)
       setEditingResourceType(null); formElement.reset(); setMasterState('idle')
+    }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
+  }
+
+  async function submitManagementDivision(e:FormEvent<HTMLFormElement>){
+    e.preventDefault()
+    const formElement=e.currentTarget
+    setMasterState('saving'); setMasterError('')
+    const form=new FormData(formElement)
+    try{
+      await saveManagementDivision({
+        name:String(form.get('managementDivisionName')||''),
+        color:String(form.get('managementDivisionColor')||'#6b7280'),
+        sortOrder:Number(form.get('managementDivisionSortOrder')||999),
+        active:true,
+      }, editingManagementDivision?.id)
+      setEditingManagementDivision(null); formElement.reset(); setMasterState('idle')
     }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
   }
 
@@ -432,6 +461,17 @@ export default function Home(){
     if(!window.confirm(`「${row.name}」を削除しますか？`)) return
     await deactivateResourceType(row.id)
     if(editingResourceType?.id===row.id) setEditingResourceType(null)
+  }
+
+  async function removeManagementDivision(row:ManagementDivisionRecord){
+    if(resourceOptions.some((resource)=>resource.managementDivisionId===row.id)){
+      setMasterError('この管理区分を使用している設備があります。先に設備の管理区分を変更してください。')
+      setMasterState('error')
+      return
+    }
+    if(!window.confirm(`「${row.name}」を削除しますか？`)) return
+    await deactivateManagementDivision(row.id)
+    if(editingManagementDivision?.id===row.id) setEditingManagementDivision(null)
   }
 
   async function removeEventCategory(row:EventCategoryRecord){
@@ -570,7 +610,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.4.1</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.4.2</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -714,12 +754,19 @@ export default function Home(){
         <div className="field">
           <span>設備・リソース予約（必要な場合のみ）</span>
           <div className="resource-picker">
-            {resourceTypeOptions.map((type)=>{
-              const rows=resourceOptions.filter((row)=>row.typeId===type.id)
-              if(!rows.length) return null
-              return <div className="resource-group" key={type.id}>
-                <strong><i className="employee-color-dot" style={{background:type.color}}/> {type.name}</strong>
-                <div className="resource-checks">{rows.map((row)=><label key={row.id}><input type="checkbox" checked={selectedResourceIds.includes(row.id)} onChange={()=>toggleResource(row.id)}/><span>{row.name}</span></label>)}</div>
+            {managementDivisionOptions.map((division)=>{
+              const divisionResources=resourceOptions.filter((row)=>row.managementDivisionId===division.id)
+              if(!divisionResources.length) return null
+              return <div className="resource-division" key={division.id}>
+                <div className="resource-division-title"><i className="employee-color-dot" style={{background:division.color}}/><strong>{division.name}</strong></div>
+                {resourceTypeOptions.map((type)=>{
+                  const rows=divisionResources.filter((row)=>row.typeId===type.id)
+                  if(!rows.length) return null
+                  return <div className="resource-group" key={type.id}>
+                    <strong><i className="employee-color-dot" style={{background:type.color}}/> {type.name}</strong>
+                    <div className="resource-checks">{rows.map((row)=><label key={row.id}><input type="checkbox" checked={selectedResourceIds.includes(row.id)} onChange={()=>toggleResource(row.id)}/><span>{row.name}</span></label>)}</div>
+                  </div>
+                })}
               </div>
             })}
             {resourceOptions.length===0&&<div className="empty-panel">設備・リソースが未登録です。</div>}
@@ -773,18 +820,20 @@ export default function Home(){
       <div className="view-tabs master-tabs">
         <button type="button" className={masterTab==='resources'?'active':''} onClick={()=>setMasterTab('resources')}>設備・リソース</button>
         <button type="button" className={masterTab==='resourceTypes'?'active':''} onClick={()=>setMasterTab('resourceTypes')}>リソース種別</button>
+        <button type="button" className={masterTab==='managementDivisions'?'active':''} onClick={()=>setMasterTab('managementDivisions')}>管理区分</button>
         <button type="button" className={masterTab==='categories'?'active':''} onClick={()=>setMasterTab('categories')}>予定種別</button>
       </div>
       {masterTab==='resources'&&<>
         <form className="master-form" onSubmit={submitResourceMaster} key={editingResource?.id||'new-resource'}>
           <input name="resourceName" required placeholder="名称" defaultValue={editingResource?.name||''}/>
           <select name="resourceTypeId" defaultValue={editingResource?.typeId||resourceTypeOptions[0]?.id||''}>{resourceTypeOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select>
+          <select name="managementDivisionId" defaultValue={editingResource?.managementDivisionId||managementDivisionOptions[0]?.id||''}>{managementDivisionOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select>
           <input name="resourceSortOrder" type="number" min="0" placeholder="表示順" defaultValue={editingResource?.sortOrder??999}/>
           <input name="resourceColor" type="color" defaultValue={editingResource?.color||'#2463a8'}/>
           <button className="btn primary" type="submit">{editingResource?'更新':'追加'}</button>
           {editingResource&&<button className="btn secondary" type="button" onClick={()=>setEditingResource(null)}>取消</button>}
         </form>
-        <div className="master-list">{resourceOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>{resourceTypeOptions.find((type)=>type.id===row.typeId)?.name||'種別未設定'} / 表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingResource(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeResourceMaster(row)}>削除</button></div></div>)}</div>
+        <div className="master-list">{resourceOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>{managementDivisionOptions.find((division)=>division.id===row.managementDivisionId)?.name||'管理区分未設定'} / {resourceTypeOptions.find((type)=>type.id===row.typeId)?.name||'種別未設定'} / 表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingResource(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeResourceMaster(row)}>削除</button></div></div>)}</div>
       </>}
       {masterTab==='resourceTypes'&&<>
         <form className="master-form" onSubmit={submitResourceType} key={editingResourceType?.id||'new-resource-type'}>
@@ -795,6 +844,16 @@ export default function Home(){
           {editingResourceType&&<button className="btn secondary" type="button" onClick={()=>setEditingResourceType(null)}>取消</button>}
         </form>
         <div className="master-list">{resourceTypeOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingResourceType(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeResourceType(row)}>削除</button></div></div>)}</div>
+      </>}
+      {masterTab==='managementDivisions'&&<>
+        <form className="master-form" onSubmit={submitManagementDivision} key={editingManagementDivision?.id||'new-management-division'}>
+          <input name="managementDivisionName" required placeholder="管理区分名（例：本社）" defaultValue={editingManagementDivision?.name||''}/>
+          <input name="managementDivisionSortOrder" type="number" min="0" placeholder="表示順" defaultValue={editingManagementDivision?.sortOrder??999}/>
+          <input name="managementDivisionColor" type="color" defaultValue={editingManagementDivision?.color||'#6b7280'}/>
+          <button className="btn primary" type="submit">{editingManagementDivision?'更新':'追加'}</button>
+          {editingManagementDivision&&<button className="btn secondary" type="button" onClick={()=>setEditingManagementDivision(null)}>取消</button>}
+        </form>
+        <div className="master-list">{managementDivisionOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingManagementDivision(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeManagementDivision(row)}>削除</button></div></div>)}</div>
       </>}
       {masterTab==='categories'&&<>
         <form className="master-form" onSubmit={submitEventCategory} key={editingCategory?.id||'new-category'}>
@@ -814,7 +873,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.1</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.2</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

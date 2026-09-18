@@ -240,9 +240,10 @@ export default function Home(){
 
   async function submitEmployee(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
+    const formElement=e.currentTarget
     setEmployeeState('saving')
     setEmployeeError('')
-    const form=new FormData(e.currentTarget)
+    const form=new FormData(formElement)
     try{
       await saveEmployee({
         name:String(form.get('employeeName')||''),
@@ -250,7 +251,7 @@ export default function Home(){
         department:String(form.get('employeeDepartment')||''),
         active:true,
       })
-      e.currentTarget.reset()
+      formElement.reset()
       setEmployeeState('idle')
     }catch(err){
       const detail =

@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, deactivateEmployee, saveCalendarEvent, saveEmployee, saveFeedback, subscribeCalendarEvents, subscribeEmployees, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord } from '../lib/data'
+import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateResourceMaster, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveResourceMaster, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeResourceMasters, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ResourceMasterRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
@@ -25,8 +25,6 @@ const scopeLabels: Record<CalendarEventInput['scope'], string> = {
   company: '全社',
 }
 
-const meetingRooms = ['', '第1会議室', '第2会議室']
-const vehicles = ['', '社用車A']
 const times = ['9:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00']
 const jpDays = ['日','月','火','水','木','金','土']
 const COMPANY_HOLIDAYS_2026 = new Set([
@@ -95,6 +93,14 @@ export default function Home(){
   const [employeeState,setEmployeeState]=useState<'idle'|'saving'|'error'>('idle')
   const [employeeError,setEmployeeError]=useState('')
   const [editingEmployee,setEditingEmployee]=useState<EmployeeRecord | null>(null)
+  const [resourceMasters,setResourceMasters]=useState<ResourceMasterRecord[]>([])
+  const [eventCategories,setEventCategories]=useState<EventCategoryRecord[]>([])
+  const [masterOpen,setMasterOpen]=useState(false)
+  const [masterTab,setMasterTab]=useState<'resources'|'categories'>('resources')
+  const [editingResource,setEditingResource]=useState<ResourceMasterRecord | null>(null)
+  const [editingCategory,setEditingCategory]=useState<EventCategoryRecord | null>(null)
+  const [masterState,setMasterState]=useState<'idle'|'saving'|'error'>('idle')
+  const [masterError,setMasterError]=useState('')
   const [timeDragDate,setTimeDragDate]=useState<string | null>(null)
   const [timeDragStart,setTimeDragStart]=useState<string | null>(null)
   const [timeDragEnd,setTimeDragEnd]=useState<string | null>(null)
@@ -127,11 +133,15 @@ export default function Home(){
       })
 
     const stopEmployees = subscribeEmployees(setEmployees)
+    const stopResources = subscribeResourceMasters(setResourceMasters)
+    const stopCategories = subscribeEventCategories(setEventCategories)
 
     return ()=>{
       active = false
       stop()
       stopEmployees()
+      stopResources()
+      stopCategories()
     }
   },[])
 
@@ -158,6 +168,22 @@ export default function Home(){
       employee.department.toLowerCase().includes(q)
     )
   }, [employees, employeeSearch])
+
+  const resourceOptions = useMemo(() => {
+    if (resourceMasters.length) return resourceMasters
+    return [
+      {id:'room1',name:'第1会議室',kind:'meeting_room' as const,color:'#2563eb',sortOrder:1,active:true},
+      {id:'room2',name:'第2会議室',kind:'meeting_room' as const,color:'#2563eb',sortOrder:2,active:true},
+      {id:'carA',name:'社用車A',kind:'vehicle' as const,color:'#059669',sortOrder:1,active:true},
+    ]
+  }, [resourceMasters])
+
+  const categoryOptions = useMemo(() => {
+    if (eventCategories.length) return eventCategories
+    return Object.entries(categoryLabels).map(([id,name],index)=>({
+      id,name,color:'#6b7280',sortOrder:index+1,active:true,
+    }))
+  }, [eventCategories])
 
   const visibleEvents = useMemo(() => events.filter((event) => {
     if (event.scope === 'company') return showCompany
@@ -317,6 +343,58 @@ export default function Home(){
     return { borderLeftColor: employee.color, background: `${employee.color}20` }
   }
 
+  async function submitResourceMaster(e:FormEvent<HTMLFormElement>){
+    e.preventDefault()
+    setMasterState('saving'); setMasterError('')
+    const form=new FormData(e.currentTarget)
+    try{
+      await saveResourceMaster({
+        name:String(form.get('resourceName')||''),
+        kind:String(form.get('resourceKind')||'meeting_room') as 'meeting_room'|'vehicle',
+        color:String(form.get('resourceColor')||'#2463a8'),
+        sortOrder:Number(form.get('resourceSortOrder')||999),
+        active:true,
+      }, editingResource?.id)
+      setEditingResource(null); e.currentTarget.reset(); setMasterState('idle')
+    }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
+  }
+
+  async function submitEventCategory(e:FormEvent<HTMLFormElement>){
+    e.preventDefault()
+    setMasterState('saving'); setMasterError('')
+    const form=new FormData(e.currentTarget)
+    try{
+      await saveEventCategory({
+        name:String(form.get('categoryName')||''),
+        color:String(form.get('categoryColor')||'#6b7280'),
+        sortOrder:Number(form.get('categorySortOrder')||999),
+        active:true,
+      }, editingCategory?.id)
+      setEditingCategory(null); e.currentTarget.reset(); setMasterState('idle')
+    }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
+  }
+
+  async function removeResourceMaster(row:ResourceMasterRecord){
+    if(!window.confirm(`「${row.name}」を削除しますか？`)) return
+    await deactivateResourceMaster(row.id)
+    if(editingResource?.id===row.id) setEditingResource(null)
+  }
+
+  async function removeEventCategory(row:EventCategoryRecord){
+    if(!window.confirm(`「${row.name}」を削除しますか？`)) return
+    await deactivateEventCategory(row.id)
+    if(editingCategory?.id===row.id) setEditingCategory(null)
+  }
+
+  function categoryLabelFor(id:string){
+    return categoryOptions.find((x)=>x.id===id)?.name ?? categoryLabels[id as keyof typeof categoryLabels] ?? id
+  }
+
+  function categoryStyleFor(id:string){
+    const color=categoryOptions.find((x)=>x.id===id)?.color
+    return color ? { background: `${color}20`, borderLeftColor: color } : undefined
+  }
+
   function openEventDetail(event: UiEvent){
     setSelectedEvent(event)
     setDetailOpen(true)
@@ -431,11 +509,12 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.3.2</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.4.0</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
         <button className="btn secondary" type="button" onClick={()=>setEmployeeMasterOpen(true)}>社員マスタ</button>
+        <button className="btn secondary" type="button" onClick={()=>setMasterOpen(true)}>各種マスタ</button>
         <button className="btn secondary" type="button" onClick={()=>setNotice('設備予約は通常の予定登録画面から行います。')}>設備予約</button>
         <button className="btn primary" type="button" onClick={()=>openNewEvent()}>＋ 予定を作成</button>
       </div>
@@ -466,7 +545,7 @@ export default function Home(){
         <section>
           <h2>予定種別</h2>
           <div className="legend-list">
-            {Object.entries(categoryLabels).map(([key,label])=><span key={key}><i className={`legend-color ${categoryClass(key as CalendarEventInput['category'])}`}/>{label}</span>)}
+            {categoryOptions.map((row)=><span key={row.id}><i className="legend-color" style={{background:row.color}}/>{row.name}</span>)}
           </div>
         </section>
         <section>
@@ -488,7 +567,7 @@ export default function Home(){
               onMouseDown={(e)=>{if(e.button===0){e.preventDefault();beginTimeSelection(date,time)}}}
               onMouseEnter={()=>extendTimeSelection(date,time)}
               onMouseUp={()=>finishTimeSelection(date,time)}
-            >{items.map(item=><button className={`event-card ${categoryClass(item.category)}`} style={eventPersonalStyle(item)} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.allDay?'終日':`${item.startTime}〜${item.endTime}`}・{categoryLabels[item.category]}</span><span>{item.location||item.participants||scopeLabels[item.scope]}</span></button>)}</div>
+            >{items.map(item=><button className={`event-card ${categoryClass(item.category)}`} style={{...categoryStyleFor(item.category),...eventPersonalStyle(item)}} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.allDay?'終日':`${item.startTime}〜${item.endTime}`}・{categoryLabelFor(item.category)}</span><span>{item.location||item.participants||scopeLabels[item.scope]}</span></button>)}</div>
           })}
         </div>)}
       </section>}
@@ -497,7 +576,7 @@ export default function Home(){
         <div className="day-view-head"><strong>{jpDays[selected.getDay()]} {selected.getMonth()+1}/{selected.getDate()} {isCompanyHoliday(selectedDate)&&<span className="holiday-badge">休業日</span>}</strong><span>{visibleEvents.filter(e=>occursOn(e,selectedDate)).length}件</span></div>
         <div className="all-day-row">
           <div className="time-label">終日</div>
-          <div className="slot">{visibleEvents.filter(e=>occursOn(e,selectedDate)&&e.allDay).map(item=><button className={`event-card wide ${categoryClass(item.category)}`} style={eventPersonalStyle(item)} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{categoryLabels[item.category]}・{scopeLabels[item.scope]}</span></button>)}</div>
+          <div className="slot">{visibleEvents.filter(e=>occursOn(e,selectedDate)&&e.allDay).map(item=><button className={`event-card wide ${categoryClass(item.category)}`} style={{...categoryStyleFor(item.category),...eventPersonalStyle(item)}} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{categoryLabelFor(item.category)}・{scopeLabels[item.scope]}</span></button>)}</div>
         </div>
         {times.map(time=>{
           const items=visibleEvents.filter(e=>occursOn(e,selectedDate)&&!e.allDay&&e.startTime.startsWith(time.slice(0,2)))
@@ -506,7 +585,7 @@ export default function Home(){
             onMouseDown={(e)=>{if(e.button===0){e.preventDefault();beginTimeSelection(selectedDate,time)}}}
             onMouseEnter={()=>extendTimeSelection(selectedDate,time)}
             onMouseUp={()=>finishTimeSelection(selectedDate,time)}
-          >{items.map(item=><button className={`event-card wide ${categoryClass(item.category)}`} style={eventPersonalStyle(item)} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.startTime}〜{item.endTime}　{categoryLabels[item.category]}　{item.location||''}</span></button>)}</div></div>
+          >{items.map(item=><button className={`event-card wide ${categoryClass(item.category)}`} style={{...categoryStyleFor(item.category),...eventPersonalStyle(item)}} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.startTime}〜{item.endTime}　{categoryLabelFor(item.category)}　{item.location||''}</span></button>)}</div></div>
         })}
       </section>}
 
@@ -526,7 +605,7 @@ export default function Home(){
             onKeyDown={(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openNewEvent(key) } }}
           >
             <span className="month-day-num">{date.getDate()}{isCompanyHoliday(key)&&<span className="holiday-badge">休業日</span>}</span>
-            <span className="month-events">{all.slice(0,5).map(item=><span className={`month-event ${categoryClass(item.category)}`} style={eventPersonalStyle(item)} key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={(e)=>{e.stopPropagation();openEventDetail(item)}}>{item.allDay?'':item.startTime+' '}{item.title}</span>)}{all.length>5&&<span className="more">他 {all.length-5}件</span>}</span>
+            <span className="month-events">{all.slice(0,5).map(item=><span className={`month-event ${categoryClass(item.category)}`} style={{...categoryStyleFor(item.category),...eventPersonalStyle(item)}} key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={(e)=>{e.stopPropagation();openEventDetail(item)}}>{item.allDay?'':item.startTime+' '}{item.title}</span>)}{all.length>5&&<span className="more">他 {all.length-5}件</span>}</span>
           </div>
         })}</div>
       </section>}
@@ -534,7 +613,7 @@ export default function Home(){
 
 
     {detailOpen&&selectedEvent&&<div className="modal-backdrop" onMouseDown={()=>setDetailOpen(false)}><div className="modal detail-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
-      <div className="modal-head"><div><div className="eyebrow">{categoryLabels[selectedEvent.category]}・{scopeLabels[selectedEvent.scope]}</div><h2>{selectedEvent.title}</h2></div><button className="icon-btn" type="button" onClick={()=>setDetailOpen(false)}>×</button></div>
+      <div className="modal-head"><div><div className="eyebrow">{categoryLabelFor(selectedEvent.category)}・{scopeLabels[selectedEvent.scope]}</div><h2>{selectedEvent.title}</h2></div><button className="icon-btn" type="button" onClick={()=>setDetailOpen(false)}>×</button></div>
       <div className="detail-grid">
         <div><span>日時</span><strong>{selectedEvent.date}{selectedEvent.endDate&&selectedEvent.endDate!==selectedEvent.date?` ～ ${selectedEvent.endDate}`:''}　{selectedEvent.allDay?'終日':`${selectedEvent.startTime}～${selectedEvent.endTime}`}</strong></div>
         <div><span>場所</span><strong>{selectedEvent.location||'未設定'}</strong></div>
@@ -556,7 +635,7 @@ export default function Home(){
       <div className="modal-head"><div><div className="eyebrow">会社予定・個人予定・設備予約</div><h2>{editingEvent?'予定を編集':'予定を作成'}</h2></div><button className="icon-btn" type="button" onClick={()=>setEventOpen(false)}>×</button></div>
       {eventState==='sent'?<div className="success">予定を登録しました。<div className="modal-actions"><button type="button" className="btn primary" onClick={()=>setEventOpen(false)}>閉じる</button></div></div>:<form onSubmit={submitEvent}>
         <label className="field">タイトル<input name="title" required placeholder="例：姫路出張、○○工場定修工事、ABC社打合せ" defaultValue={editingEvent?.title||''}/></label>
-        <div className="form-grid two"><label className="field">予定種別<select name="category" defaultValue={editingEvent?.category||"meeting"}><option value="meeting">会議</option><option value="visitor">来客</option><option value="business_trip">出張</option><option value="construction">工事</option><option value="outing">外出</option><option value="leave">休暇</option><option value="company_event">会社行事</option><option value="other">その他</option></select></label><label className="field">公開範囲<select name="scope" defaultValue={editingEvent?.scope||"personal"}><option value="personal">個人</option><option value="department">部署</option><option value="company">全社</option></select></label></div>
+        <div className="form-grid two"><label className="field">予定種別<select name="category" defaultValue={editingEvent?.category||categoryOptions[0]?.id||"meeting"}>{categoryOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select></label><label className="field">公開範囲<select name="scope" defaultValue={editingEvent?.scope||"personal"}><option value="personal">個人</option><option value="department">部署</option><option value="company">全社</option></select></label></div>
         <label className="check-field"><input name="allDay" type="checkbox" defaultChecked={editingEvent?.allDay??draftAllDay}/> 終日予定</label>
         <div className="form-grid four"><label className="field">開始日<input name="date" type="date" required defaultValue={editingEvent?.date||draftStartDate}/></label><label className="field">終了日<input name="endDate" type="date" required defaultValue={editingEvent?.endDate||editingEvent?.date||draftEndDate}/></label><label className="field">開始<input name="startTime" type="time" defaultValue={editingEvent?.startTime||"10:00"}/></label><label className="field">終了<input name="endTime" type="time" defaultValue={editingEvent?.endTime||"11:00"}/></label></div>
         <label className="field">場所<input name="location" placeholder="例：JFE倉敷、東京本社、Web" defaultValue={editingEvent?.location||''}/></label>
@@ -574,12 +653,12 @@ export default function Home(){
         <div className="form-grid two">
           <label className="field">会議室（必要な場合のみ）
             <select name="meetingRoom" defaultValue={editingEvent?.meetingRoom||((editingEvent?.resource||'').includes('会議室')?editingEvent?.resource:'')}>
-              {meetingRooms.map(r=><option value={r} key={r||'none'}>{r||'使用しない'}</option>)}
+              <option value="">使用しない</option>{resourceOptions.filter(r=>r.kind==='meeting_room').map(r=><option value={r.name} key={r.id}>{r.name}</option>)}
             </select>
           </label>
           <label className="field">社用車（必要な場合のみ）
             <select name="vehicle" defaultValue={editingEvent?.vehicle||((editingEvent?.resource||'').includes('社用車')?editingEvent?.resource:'')}>
-              {vehicles.map(r=><option value={r} key={r||'none'}>{r||'使用しない'}</option>)}
+              <option value="">使用しない</option>{resourceOptions.filter(r=>r.kind==='vehicle').map(r=><option value={r.name} key={r.id}>{r.name}</option>)}
             </select>
           </label>
         </div>
@@ -625,12 +704,43 @@ export default function Home(){
       </div>
     </div></div>}
 
+
+    {masterOpen&&<div className="modal-backdrop" onMouseDown={()=>setMasterOpen(false)}><div className="modal master-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
+      <div className="modal-head"><div><div className="eyebrow">予約アプリ方式のマスタ管理</div><h2>各種マスタ</h2></div><button className="icon-btn" type="button" onClick={()=>setMasterOpen(false)}>×</button></div>
+      <div className="view-tabs master-tabs">
+        <button type="button" className={masterTab==='resources'?'active':''} onClick={()=>setMasterTab('resources')}>会議室・社用車</button>
+        <button type="button" className={masterTab==='categories'?'active':''} onClick={()=>setMasterTab('categories')}>予定種別</button>
+      </div>
+      {masterTab==='resources'&&<>
+        <form className="master-form" onSubmit={submitResourceMaster} key={editingResource?.id||'new-resource'}>
+          <input name="resourceName" required placeholder="名称" defaultValue={editingResource?.name||''}/>
+          <select name="resourceKind" defaultValue={editingResource?.kind||'meeting_room'}><option value="meeting_room">会議室</option><option value="vehicle">社用車</option></select>
+          <input name="resourceSortOrder" type="number" min="0" placeholder="表示順" defaultValue={editingResource?.sortOrder??999}/>
+          <input name="resourceColor" type="color" defaultValue={editingResource?.color||'#2463a8'}/>
+          <button className="btn primary" type="submit">{editingResource?'更新':'追加'}</button>
+          {editingResource&&<button className="btn secondary" type="button" onClick={()=>setEditingResource(null)}>取消</button>}
+        </form>
+        <div className="master-list">{resourceOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>{row.kind==='meeting_room'?'会議室':'社用車'} / 表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingResource(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeResourceMaster(row)}>削除</button></div></div>)}</div>
+      </>}
+      {masterTab==='categories'&&<>
+        <form className="master-form" onSubmit={submitEventCategory} key={editingCategory?.id||'new-category'}>
+          <input name="categoryName" required placeholder="予定種別名" defaultValue={editingCategory?.name||''}/>
+          <input name="categorySortOrder" type="number" min="0" placeholder="表示順" defaultValue={editingCategory?.sortOrder??999}/>
+          <input name="categoryColor" type="color" defaultValue={editingCategory?.color||'#6b7280'}/>
+          <button className="btn primary" type="submit">{editingCategory?'更新':'追加'}</button>
+          {editingCategory&&<button className="btn secondary" type="button" onClick={()=>setEditingCategory(null)}>取消</button>}
+        </form>
+        <div className="master-list">{categoryOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingCategory(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeEventCategory(row)}>削除</button></div></div>)}</div>
+      </>}
+      {masterState==='error'&&<div className="error">保存に失敗しました。<br/><small>{masterError}</small></div>}
+    </div></div>}
+
     {feedbackOpen&&<div className="modal-backdrop" onMouseDown={()=>setFeedbackOpen(false)}><div className="modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">改善提案・不具合報告</div><h2>フィードバック</h2></div><button className="icon-btn" type="button" onClick={()=>setFeedbackOpen(false)}>×</button></div>
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.3.2</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.0</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

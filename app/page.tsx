@@ -30,6 +30,7 @@ export default function Home(){
   const [eventOpen,setEventOpen]=useState(false)
   const [feedbackOpen,setFeedbackOpen]=useState(false)
   const [eventState,setEventState]=useState<'idle'|'saving'|'sent'|'error'|'conflict'>('idle')
+  const [eventError,setEventError]=useState('')
   const [feedbackState,setFeedbackState]=useState<'idle'|'saving'|'sent'|'error'>('idle')
   const [notice,setNotice]=useState('')
   const [loadState,setLoadState]=useState<'確認中'|'同期中'|'デモ'>('確認中')
@@ -87,7 +88,7 @@ export default function Home(){
   }
 
   async function submitEvent(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setEventState('saving')
+    e.preventDefault(); setEventState('saving'); setEventError('')
     const form=new FormData(e.currentTarget)
     const input={
       title:String(form.get('title')||''),
@@ -129,7 +130,19 @@ export default function Home(){
 
       setNotice(message)
     }catch(err){
-      setEventState(err instanceof Error && err.message==='RESERVATION_CONFLICT'?'conflict':'error')
+      if (err instanceof Error && err.message==='RESERVATION_CONFLICT') {
+        setEventState('conflict')
+        return
+      }
+      const detail =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err && 'code' in err
+            ? String((err as { code?: unknown }).code ?? 'UNKNOWN_ERROR')
+            : String(err)
+      setEventError(detail)
+      setEventState('error')
+      console.error('PJ-029 save failed', err)
     }
   }
 
@@ -223,7 +236,7 @@ export default function Home(){
         <label className="field">会議室・社用車<select name="resource" defaultValue="第1会議室">{resources.map(r=><option value={r} key={r||'none'}>{r||'使用しない'}</option>)}</select></label>
         <div className="check-row"><label><input name="notifyEmail" type="checkbox" defaultChecked/> メール通知</label><label><input name="notifyTeams" type="checkbox" defaultChecked/> Teams通知（来客会議室予約）</label></div><div className="auto-info">Teams通知はPJ-020と同じく、通知文をコピーして指定Teamsチャットを開く方式です。</div>
         {eventState==='conflict'&&<div className="error">この設備は指定時間帯に既に予約されています。時間または設備を変更してください。</div>}
-        {eventState==='error'&&<div className="error">保存に失敗しました。入力内容またはFirebase設定を確認してください。</div>}
+        {eventState==='error'&&<div className="error">保存に失敗しました。<br/><small>エラー：{eventError || '詳細不明'}</small></div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setEventOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={eventState==='saving'}>{eventState==='saving'?'保存中…':'登録する'}</button></div>
       </form>}
     </div></div>}

@@ -1,4 +1,5 @@
 import type { CalendarEventInput } from './data'
+import { getRuntimeConfig } from './firebase'
 
 export function shouldOpenTeams(input: CalendarEventInput) {
   return Boolean(
@@ -40,7 +41,8 @@ function fallbackCopyText(value: string) {
 }
 
 export async function openTeamsNotification(input: CalendarEventInput) {
-  const teamsUrl = (process.env.NEXT_PUBLIC_TEAMS_MEETING_CHAT_URL || '').trim()
+  const runtime = await getRuntimeConfig()
+  const teamsUrl = (runtime.teamsMeetingChatUrl || '').trim()
   if (!teamsUrl) {
     return { ok: false as const, reason: 'NO_URL' as const }
   }

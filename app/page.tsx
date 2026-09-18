@@ -69,6 +69,12 @@ export default function Home(){
   const [showCompany,setShowCompany]=useState(true)
   const [showPersonal,setShowPersonal]=useState(true)
   const [showDepartment,setShowDepartment]=useState(true)
+  const [draftStartDate,setDraftStartDate]=useState(todayKey())
+  const [draftEndDate,setDraftEndDate]=useState(todayKey())
+  const [draftAllDay,setDraftAllDay]=useState(false)
+  const [dragStartDate,setDragStartDate]=useState<string | null>(null)
+  const [dragEndDate,setDragEndDate]=useState<string | null>(null)
+  const [isMonthDragging,setIsMonthDragging]=useState(false)
 
   useEffect(()=>{
     let stop: () => void = () => {}
@@ -116,22 +122,49 @@ export default function Home(){
     setSelectedDate(toDateKey(addDays(selected,step*(viewMode==='week'?7:1))))
   }
 
-  function openNewEvent(date=selectedDate,time='10:00'){
+  function openNewEvent(date=selectedDate,time='10:00',endDate=date,allDay=false){
     setSelectedDate(date)
+    setDraftStartDate(date)
+    setDraftEndDate(endDate)
+    setDraftAllDay(allDay)
     setEventState('idle')
     setEventError('')
     setEditingEvent(null)
     setEventOpen(true)
     requestAnimationFrame(()=>{
-      const dateInput=document.querySelector<HTMLInputElement>('input[name="date"]')
-      const endDateInput=document.querySelector<HTMLInputElement>('input[name="endDate"]')
       const timeInput=document.querySelector<HTMLInputElement>('input[name="startTime"]')
       const endTimeInput=document.querySelector<HTMLInputElement>('input[name="endTime"]')
-      if(dateInput) dateInput.value=date
-      if(endDateInput) endDateInput.value=date
       if(timeInput) timeInput.value=time
       if(endTimeInput) endTimeInput.value=addOneHour(time)
     })
+  }
+
+  function beginMonthSelection(date:string){
+    setDragStartDate(date)
+    setDragEndDate(date)
+    setIsMonthDragging(true)
+  }
+
+  function extendMonthSelection(date:string){
+    if (!isMonthDragging || !dragStartDate) return
+    setDragEndDate(date)
+  }
+
+  function finishMonthSelection(date:string){
+    if (!isMonthDragging || !dragStartDate) return
+    const start = dragStartDate <= date ? dragStartDate : date
+    const end = dragStartDate <= date ? date : dragStartDate
+    setIsMonthDragging(false)
+    setDragStartDate(null)
+    setDragEndDate(null)
+    openNewEvent(start,'09:00',end,start !== end)
+  }
+
+  function isDateInDragRange(date:string){
+    if (!isMonthDragging || !dragStartDate || !dragEndDate) return false
+    const start = dragStartDate <= dragEndDate ? dragStartDate : dragEndDate
+    const end = dragStartDate <= dragEndDate ? dragEndDate : dragStartDate
+    return start <= date && date <= end
   }
 
   function openEventDetail(event: UiEvent){
@@ -145,6 +178,9 @@ export default function Home(){
     setDetailOpen(false)
     setEventState('idle')
     setEventError('')
+    setDraftStartDate(event.date)
+    setDraftEndDate(event.endDate || event.date)
+    setDraftAllDay(event.allDay)
     setEventOpen(true)
   }
 
@@ -238,7 +274,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.2.3</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.2.4</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -310,10 +346,19 @@ export default function Home(){
         <div className="month-grid">{monthDays.map(date=>{
           const key=toDateKey(date)
           const all=visibleEvents.filter(e=>occursOn(e,key)).sort((a,b)=>Number(b.allDay)-Number(a.allDay)||a.startTime.localeCompare(b.startTime))
-          return <button type="button" className={`month-cell ${date.getMonth()!==selected.getMonth()?'outside':''}`} key={key} onClick={()=>{setSelectedDate(key);setViewMode('day')}}>
+          return <div
+            role="button"
+            tabIndex={0}
+            className={`month-cell ${date.getMonth()!==selected.getMonth()?'outside':''} ${isDateInDragRange(key)?'range-selecting':''}`}
+            key={key}
+            onMouseDown={(e)=>{ if(e.button===0){ e.preventDefault(); beginMonthSelection(key) } }}
+            onMouseEnter={()=>extendMonthSelection(key)}
+            onMouseUp={()=>finishMonthSelection(key)}
+            onKeyDown={(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openNewEvent(key) } }}
+          >
             <span className="month-day-num">{date.getDate()}</span>
-            <span className="month-events">{all.slice(0,5).map(item=><span className={`month-event ${categoryClass(item.category)}`} key={item.id} onClick={(e)=>{e.stopPropagation();openEventDetail(item)}}>{item.allDay?'':item.startTime+' '}{item.title}</span>)}{all.length>5&&<span className="more">他 {all.length-5}件</span>}</span>
-          </button>
+            <span className="month-events">{all.slice(0,5).map(item=><span className={`month-event ${categoryClass(item.category)}`} key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={(e)=>{e.stopPropagation();openEventDetail(item)}}>{item.allDay?'':item.startTime+' '}{item.title}</span>)}{all.length>5&&<span className="more">他 {all.length-5}件</span>}</span>
+          </div>
         })}</div>
       </section>}
     </div>
@@ -343,8 +388,8 @@ export default function Home(){
       {eventState==='sent'?<div className="success">予定を登録しました。<div className="modal-actions"><button type="button" className="btn primary" onClick={()=>setEventOpen(false)}>閉じる</button></div></div>:<form onSubmit={submitEvent}>
         <label className="field">タイトル<input name="title" required placeholder="例：姫路出張、○○工場定修工事、ABC社打合せ" defaultValue={editingEvent?.title||''}/></label>
         <div className="form-grid two"><label className="field">予定種別<select name="category" defaultValue={editingEvent?.category||"meeting"}><option value="meeting">会議</option><option value="visitor">来客</option><option value="business_trip">出張</option><option value="construction">工事</option><option value="outing">外出</option><option value="leave">休暇</option><option value="company_event">会社行事</option><option value="other">その他</option></select></label><label className="field">公開範囲<select name="scope" defaultValue={editingEvent?.scope||"personal"}><option value="personal">個人</option><option value="department">部署</option><option value="company">全社</option></select></label></div>
-        <label className="check-field"><input name="allDay" type="checkbox" defaultChecked={editingEvent?.allDay||false}/> 終日予定</label>
-        <div className="form-grid four"><label className="field">開始日<input name="date" type="date" required defaultValue={editingEvent?.date||selectedDate}/></label><label className="field">終了日<input name="endDate" type="date" required defaultValue={editingEvent?.endDate||editingEvent?.date||selectedDate}/></label><label className="field">開始<input name="startTime" type="time" defaultValue={editingEvent?.startTime||"10:00"}/></label><label className="field">終了<input name="endTime" type="time" defaultValue={editingEvent?.endTime||"11:00"}/></label></div>
+        <label className="check-field"><input name="allDay" type="checkbox" defaultChecked={editingEvent?.allDay??draftAllDay}/> 終日予定</label>
+        <div className="form-grid four"><label className="field">開始日<input name="date" type="date" required defaultValue={editingEvent?.date||draftStartDate}/></label><label className="field">終了日<input name="endDate" type="date" required defaultValue={editingEvent?.endDate||editingEvent?.date||draftEndDate}/></label><label className="field">開始<input name="startTime" type="time" defaultValue={editingEvent?.startTime||"10:00"}/></label><label className="field">終了<input name="endTime" type="time" defaultValue={editingEvent?.endTime||"11:00"}/></label></div>
         <label className="field">場所<input name="location" placeholder="例：JFE倉敷、東京本社、Web" defaultValue={editingEvent?.location||''}/></label>
         <label className="field">社内参加者<input name="participants" placeholder="例：坂下・岩井" defaultValue={editingEvent?.participants||''}/></label>
         <label className="field">外部参加者・来訪者<input name="externalParticipants" placeholder="例：ABC社 田中様" defaultValue={editingEvent?.externalParticipants||''}/></label>
@@ -373,7 +418,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.2.3</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.2.4</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

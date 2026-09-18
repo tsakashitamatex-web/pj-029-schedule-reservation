@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
+import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, importPj020MigrationData, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
@@ -106,6 +106,10 @@ export default function Home(){
   const [selectedResourceIds,setSelectedResourceIds]=useState<string[]>([])
   const [masterState,setMasterState]=useState<'idle'|'saving'|'error'>('idle')
   const [masterError,setMasterError]=useState('')
+  const [migrationOpen,setMigrationOpen]=useState(false)
+  const [migrationText,setMigrationText]=useState('')
+  const [migrationState,setMigrationState]=useState<'idle'|'running'|'done'|'error'>('idle')
+  const [migrationMessage,setMigrationMessage]=useState('')
   const [timeDragDate,setTimeDragDate]=useState<string | null>(null)
   const [timeDragStart,setTimeDragStart]=useState<string | null>(null)
   const [timeDragEnd,setTimeDragEnd]=useState<string | null>(null)
@@ -380,6 +384,32 @@ export default function Home(){
     return { borderLeftColor: employee.color }
   }
 
+  async function runPj020Migration(){
+    if(!migrationText.trim()) return
+    setMigrationState('running')
+    setMigrationMessage('')
+    try{
+      const result=await importPj020MigrationData(migrationText)
+      setMigrationState('done')
+      setMigrationMessage(`取込完了：管理区分 ${result.managementDivisions}件、リソース種別 ${result.resourceTypes}件、設備 ${result.resources}件、予約 ${result.reservations}件`)
+    }catch(err){
+      setMigrationState('error')
+      setMigrationMessage(err instanceof Error?err.message:String(err))
+    }
+  }
+
+  async function pasteMigrationData(){
+    try{
+      const text=await navigator.clipboard.readText()
+      setMigrationText(text)
+      setMigrationState('idle')
+      setMigrationMessage('')
+    }catch{
+      setMigrationState('error')
+      setMigrationMessage('クリップボードを読み取れませんでした。入力欄へ直接貼り付けてください。')
+    }
+  }
+
   async function submitResourceMaster(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
     const formElement=e.currentTarget
@@ -610,7 +640,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.4.2</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.4.3</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -816,7 +846,7 @@ export default function Home(){
 
 
     {masterOpen&&<div className="modal-backdrop" onMouseDown={()=>setMasterOpen(false)}><div className="modal master-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
-      <div className="modal-head"><div><div className="eyebrow">予約アプリ方式のマスタ管理</div><h2>各種マスタ</h2></div><button className="icon-btn" type="button" onClick={()=>setMasterOpen(false)}>×</button></div>
+      <div className="modal-head"><div><div className="eyebrow">予約アプリ方式のマスタ管理</div><h2>各種マスタ</h2></div><div className="top-actions"><button className="btn secondary" type="button" onClick={()=>{setMigrationOpen(true);setMigrationState('idle');setMigrationMessage('')}}>予約アプリから取り込み</button><button className="icon-btn" type="button" onClick={()=>setMasterOpen(false)}>×</button></div></div>
       <div className="view-tabs master-tabs">
         <button type="button" className={masterTab==='resources'?'active':''} onClick={()=>setMasterTab('resources')}>設備・リソース</button>
         <button type="button" className={masterTab==='resourceTypes'?'active':''} onClick={()=>setMasterTab('resourceTypes')}>リソース種別</button>
@@ -868,12 +898,24 @@ export default function Home(){
       {masterState==='error'&&<div className="error">保存に失敗しました。<br/><small>{masterError}</small></div>}
     </div></div>}
 
+    {migrationOpen&&<div className="modal-backdrop" onMouseDown={()=>setMigrationOpen(false)}><div className="modal migration-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
+      <div className="modal-head"><div><div className="eyebrow">PJ-020予約アプリから移行</div><h2>マスタ・予約情報を取り込む</h2></div><button className="icon-btn" type="button" onClick={()=>setMigrationOpen(false)}>×</button></div>
+      <div className="auto-info">PJ-020の「設定」→「PJ-029移行データをコピー」を押し、下の欄へ貼り付けてください。同じデータを再度取り込んでも同じIDへ上書きされるため重複しません。</div>
+      <label className="field">移行データ<textarea rows={9} value={migrationText} onChange={e=>setMigrationText(e.target.value)} placeholder="ここにPJ-020からコピーしたデータを貼り付け"/></label>
+      <div className="modal-actions">
+        <button className="btn secondary" type="button" onClick={pasteMigrationData}>クリップボードから貼り付け</button>
+        <button className="btn primary" type="button" disabled={migrationState==='running'||!migrationText.trim()} onClick={runPj020Migration}>{migrationState==='running'?'取り込み中…':'取り込む'}</button>
+      </div>
+      {migrationState==='done'&&<div className="success migration-result">{migrationMessage}</div>}
+      {migrationState==='error'&&<div className="error">取り込みに失敗しました。<br/><small>{migrationMessage}</small></div>}
+    </div></div>}
+
     {feedbackOpen&&<div className="modal-backdrop" onMouseDown={()=>setFeedbackOpen(false)}><div className="modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">改善提案・不具合報告</div><h2>フィードバック</h2></div><button className="icon-btn" type="button" onClick={()=>setFeedbackOpen(false)}>×</button></div>
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.2</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.3</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

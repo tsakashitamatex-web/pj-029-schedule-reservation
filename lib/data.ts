@@ -13,10 +13,17 @@ import { ensureSignedIn, getDb } from './firebase'
 export type CalendarEventInput = {
   title: string
   date: string
+  endDate: string
   startTime: string
   endTime: string
+  allDay: boolean
+  category: 'meeting' | 'visitor' | 'business_trip' | 'construction' | 'outing' | 'leave' | 'company_event' | 'other'
+  scope: 'personal' | 'department' | 'company'
+  source: 'pj029' | 'company_calendar'
   participants: string
   externalParticipants: string
+  location: string
+  description: string
   resource: string
   notifyEmail: boolean
   notifyTeams: boolean
@@ -137,10 +144,17 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
         id: doc.id,
         title: data.title ?? '',
         date: data.date ?? '',
+        endDate: data.endDate ?? data.date ?? '',
         startTime: data.startTime ?? '',
         endTime: data.endTime ?? '',
+        allDay: data.allDay ?? false,
+        category: data.category ?? 'other',
+        scope: data.scope ?? 'personal',
+        source: data.source ?? 'pj029',
         participants: data.participants ?? '',
         externalParticipants: data.externalParticipants ?? '',
+        location: data.location ?? '',
+        description: data.description ?? '',
         resource: data.resource ?? '',
         notifyEmail: data.notifyEmail ?? false,
         notifyTeams: data.notifyTeams ?? false,

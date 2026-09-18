@@ -16,6 +16,7 @@ export type CalendarEventInput = {
   startTime: string
   endTime: string
   participants: string
+  externalParticipants: string
   resource: string
   notifyEmail: boolean
   notifyTeams: boolean
@@ -72,7 +73,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.1.2',
+    version: '0.1.3',
   })
 
   const writes: Promise<unknown>[] = []
@@ -104,7 +105,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
       eventId: eventRef.id,
       channel: 'teams',
       type: 'event_created',
-      status: 'pending',
+      status: 'pending_user_send',
       createdAt: serverTimestamp(),
     }))
   }
@@ -123,6 +124,7 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
   return onSnapshot(q, (snapshot) => {
     const events = snapshot.docs.map((doc) => ({
       id: doc.id,
+      externalParticipants: '',
       ...(doc.data() as CalendarEventInput & { status?: string }),
     }))
     onChange(events)
@@ -134,7 +136,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.1.2',
+    appVersion: '0.1.3',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

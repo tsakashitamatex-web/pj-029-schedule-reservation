@@ -24,6 +24,23 @@ export type EmployeeRecord = {
   active: boolean
 }
 
+export type ResourceMasterRecord = {
+  id: string
+  name: string
+  kind: 'meeting_room' | 'vehicle'
+  color: string
+  sortOrder: number
+  active: boolean
+}
+
+export type EventCategoryRecord = {
+  id: string
+  name: string
+  color: string
+  sortOrder: number
+  active: boolean
+}
+
 export type CalendarEventInput = {
   title: string
   date: string
@@ -31,7 +48,7 @@ export type CalendarEventInput = {
   startTime: string
   endTime: string
   allDay: boolean
-  category: 'meeting' | 'visitor' | 'business_trip' | 'construction' | 'outing' | 'leave' | 'company_event' | 'other'
+  category: string
   scope: 'personal' | 'department' | 'company'
   source: 'pj029' | 'company_calendar'
   participants: string
@@ -112,7 +129,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.3.0',
+    version: '0.4.0',
   })
 
   const writes: Promise<unknown>[] = []
@@ -179,7 +196,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.3.0',
+    version: '0.4.0',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -236,7 +253,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.3.0',
+    version: '0.4.0',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -378,6 +395,128 @@ export async function deactivateEmployee(employeeId: string) {
   })
 }
 
+
+export function subscribeResourceMasters(onChange: (resources: ResourceMasterRecord[]) => void): Unsubscribe {
+  let unsubscribe: Unsubscribe = () => undefined
+  let active = true
+
+  Promise.all([ensureSignedIn(), getDb()]).then(([signedIn, db]) => {
+    if (!active) return
+    if (!signedIn || !db) {
+      onChange([])
+      return
+    }
+    unsubscribe = onSnapshot(collection(db, 'resourceMasters'), (snapshot) => {
+      const rows = snapshot.docs
+        .map((resourceDoc) => {
+          const data = resourceDoc.data() as Partial<Omit<ResourceMasterRecord, 'id'>>
+          return {
+            id: resourceDoc.id,
+            name: data.name ?? '',
+            kind: data.kind === 'vehicle' ? 'vehicle' as const : 'meeting_room' as const,
+            color: data.color ?? '#2463a8',
+            sortOrder: data.sortOrder ?? 999,
+            active: data.active ?? true,
+          }
+        })
+        .filter((row) => row.active)
+        .sort((a,b)=>a.sortOrder-b.sortOrder || a.name.localeCompare(b.name,'ja'))
+      onChange(rows)
+    })
+  })
+
+  return () => { active = false; unsubscribe() }
+}
+
+export async function saveResourceMaster(
+  input: Omit<ResourceMasterRecord, 'id'>,
+  resourceId?: string,
+) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+  if (resourceId) {
+    await updateDoc(doc(db, 'resourceMasters', resourceId), { ...input, updatedAt: serverTimestamp() })
+    return resourceId
+  }
+  const ref = await addDoc(collection(db, 'resourceMasters'), {
+    ...input,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  return ref.id
+}
+
+export async function deactivateResourceMaster(resourceId: string) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+  await updateDoc(doc(db, 'resourceMasters', resourceId), {
+    active: false,
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export function subscribeEventCategories(onChange: (categories: EventCategoryRecord[]) => void): Unsubscribe {
+  let unsubscribe: Unsubscribe = () => undefined
+  let active = true
+
+  Promise.all([ensureSignedIn(), getDb()]).then(([signedIn, db]) => {
+    if (!active) return
+    if (!signedIn || !db) {
+      onChange([])
+      return
+    }
+    unsubscribe = onSnapshot(collection(db, 'eventCategories'), (snapshot) => {
+      const rows = snapshot.docs
+        .map((categoryDoc) => {
+          const data = categoryDoc.data() as Partial<Omit<EventCategoryRecord, 'id'>>
+          return {
+            id: categoryDoc.id,
+            name: data.name ?? '',
+            color: data.color ?? '#6b7280',
+            sortOrder: data.sortOrder ?? 999,
+            active: data.active ?? true,
+          }
+        })
+        .filter((row) => row.active)
+        .sort((a,b)=>a.sortOrder-b.sortOrder || a.name.localeCompare(b.name,'ja'))
+      onChange(rows)
+    })
+  })
+
+  return () => { active = false; unsubscribe() }
+}
+
+export async function saveEventCategory(
+  input: Omit<EventCategoryRecord, 'id'>,
+  categoryId?: string,
+) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+  if (categoryId) {
+    await updateDoc(doc(db, 'eventCategories', categoryId), { ...input, updatedAt: serverTimestamp() })
+    return categoryId
+  }
+  const ref = await addDoc(collection(db, 'eventCategories'), {
+    ...input,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  return ref.id
+}
+
+export async function deactivateEventCategory(categoryId: string) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+  await updateDoc(doc(db, 'eventCategories', categoryId), {
+    active: false,
+    updatedAt: serverTimestamp(),
+  })
+}
+
 export async function saveFeedback(input: FeedbackInput) {
   const signedIn = await ensureSignedIn()
   const db = await getDb()
@@ -385,7 +524,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.3.1',
+    appVersion: '0.4.0',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

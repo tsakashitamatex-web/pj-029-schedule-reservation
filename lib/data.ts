@@ -13,6 +13,14 @@ import {
 } from 'firebase/firestore'
 import { ensureSignedIn, getDb } from './firebase'
 
+export type EmployeeRecord = {
+  id: string
+  name: string
+  email: string
+  department: string
+  active: boolean
+}
+
 export type CalendarEventInput = {
   title: string
   date: string
@@ -24,6 +32,8 @@ export type CalendarEventInput = {
   scope: 'personal' | 'department' | 'company'
   source: 'pj029' | 'company_calendar'
   participants: string
+  participantIds: string[]
+  participantEmails: string[]
   externalParticipants: string
   location: string
   description: string
@@ -99,7 +109,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.2.2',
+    version: '0.3.0',
   })
 
   const writes: Promise<unknown>[] = []
@@ -122,6 +132,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
       channel: 'email',
       type: 'event_created',
       status: 'pending',
+      recipients: input.participantEmails,
       createdAt: serverTimestamp(),
     }))
   }
@@ -165,7 +176,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.2.1',
+    version: '0.3.0',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -193,6 +204,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
       channel: 'email',
       type: 'event_updated',
       status: 'pending',
+      recipients: input.participantEmails,
       createdAt: serverTimestamp(),
     }))
   }
@@ -221,7 +233,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.2.1',
+    version: '0.3.0',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -268,6 +280,8 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
         scope: data.scope ?? 'personal',
         source: data.source ?? 'pj029',
         participants: data.participants ?? '',
+        participantIds: data.participantIds ?? [],
+        participantEmails: data.participantEmails ?? [],
         externalParticipants: data.externalParticipants ?? '',
         location: data.location ?? '',
         description: data.description ?? '',
@@ -289,6 +303,63 @@ export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]
   }
 }
 
+
+export function subscribeEmployees(onChange: (employees: EmployeeRecord[]) => void): Unsubscribe {
+  let unsubscribe: Unsubscribe = () => undefined
+  let active = true
+
+  Promise.all([ensureSignedIn(), getDb()]).then(([signedIn, db]) => {
+    if (!active) return
+    if (!signedIn || !db) {
+      onChange([])
+      return
+    }
+
+    unsubscribe = onSnapshot(collection(db, 'employees'), (snapshot) => {
+      const employees = snapshot.docs
+        .map((employeeDoc) => {
+          const data = employeeDoc.data() as Partial<Omit<EmployeeRecord, 'id'>>
+          return {
+            id: employeeDoc.id,
+            name: data.name ?? '',
+            email: data.email ?? '',
+            department: data.department ?? '',
+            active: data.active ?? true,
+          }
+        })
+        .filter((employee) => employee.active)
+        .sort((a, b) => a.name.localeCompare(b.name, 'ja'))
+      onChange(employees)
+    })
+  })
+
+  return () => {
+    active = false
+    unsubscribe()
+  }
+}
+
+export async function saveEmployee(input: Omit<EmployeeRecord, 'id'>, employeeId?: string) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+
+  if (employeeId) {
+    await updateDoc(doc(db, 'employees', employeeId), {
+      ...input,
+      updatedAt: serverTimestamp(),
+    })
+    return employeeId
+  }
+
+  const ref = await addDoc(collection(db, 'employees'), {
+    ...input,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  return ref.id
+}
+
 export async function saveFeedback(input: FeedbackInput) {
   const signedIn = await ensureSignedIn()
   const db = await getDb()
@@ -296,7 +367,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.2.2',
+    appVersion: '0.3.0',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

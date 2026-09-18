@@ -41,3 +41,12 @@
     padding-bottom:10px;
   }
 }
+
+.month-cell.range-selecting{
+  background:#e8f0fa;
+  outline:2px solid #2463a8;
+  outline-offset:-2px;
+}
+.month-cell{
+  user-select:none;
+}

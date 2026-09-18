@@ -29,6 +29,19 @@ const meetingRooms = ['', '第1会議室', '第2会議室']
 const vehicles = ['', '社用車A']
 const times = ['9:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00']
 const jpDays = ['日','月','火','水','木','金','土']
+const COMPANY_HOLIDAYS_2026 = new Set([
+  '2026-05-04','2026-05-05','2026-05-06',
+  '2026-07-20',
+  '2026-08-10','2026-08-11','2026-08-12','2026-08-13','2026-08-14',
+  '2026-09-21','2026-09-22','2026-09-23',
+  '2026-10-12',
+  '2026-11-03','2026-11-23',
+  '2026-12-29','2026-12-30','2026-12-31',
+  '2027-01-01','2027-01-04','2027-01-11',
+  '2027-02-11','2027-02-23',
+  '2027-03-22',
+])
+const COMPANY_WORKDAY_OVERRIDES_2026 = new Set(['2027-04-29'])
 
 function pad(n:number){ return String(n).padStart(2,'0') }
 function toDateKey(d:Date){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}` }
@@ -40,6 +53,11 @@ function addOneHour(time:string){
   const [h,m]=time.split(':').map(Number)
   const next=Math.min(h+1,23)
   return `${pad(next)}:${pad(m)}`
+}
+function isCompanyHoliday(date:string){
+  if (COMPANY_WORKDAY_OVERRIDES_2026.has(date)) return false
+  const d=dateFromKey(date)
+  return d.getDay()===0 || d.getDay()===6 || COMPANY_HOLIDAYS_2026.has(date)
 }
 
 function occursOn(event: UiEvent, date: string) {
@@ -135,6 +153,8 @@ export default function Home(){
     return employees.filter((employee) =>
       employee.name.toLowerCase().includes(q) ||
       employee.email.toLowerCase().includes(q) ||
+      employee.division.toLowerCase().includes(q) ||
+      employee.group.toLowerCase().includes(q) ||
       employee.department.toLowerCase().includes(q)
     )
   }, [employees, employeeSearch])
@@ -252,6 +272,7 @@ export default function Home(){
         division:String(form.get('employeeDivision')||''),
         group:String(form.get('employeeGroup')||''),
         department:String(form.get('employeeGroup')||form.get('employeeDivision')||''),
+        color:String(form.get('employeeColor')||'#2463a8'),
         active:true,
       }, editingEmployee?.id)
       formElement.reset()
@@ -284,6 +305,14 @@ export default function Home(){
       setEmployeeError(err instanceof Error ? err.message : String(err))
       setEmployeeState('error')
     }
+  }
+
+  function eventPersonalStyle(event: UiEvent){
+    const employee =
+      (event.participantIds?.[0] && employees.find((item)=>item.id===event.participantIds[0])) ||
+      (event.participantEmails?.[0] && employees.find((item)=>item.email===event.participantEmails[0]))
+    if (!employee?.color) return undefined
+    return { borderLeftColor: employee.color, background: `${employee.color}20` }
   }
 
   function openEventDetail(event: UiEvent){
@@ -400,7 +429,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.3.1</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.3.2</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -445,37 +474,37 @@ export default function Home(){
       </aside>
 
       {viewMode==='week'&&<section className="calendar-card" aria-label="週カレンダー">
-        <div className="calendar-grid header-row"><div className="time-head"/>{weekDays.map(d=><button className="day-head day-button" type="button" key={toDateKey(d)} onClick={()=>{setSelectedDate(toDateKey(d));setViewMode('day')}}>{jpDays[d.getDay()]} {d.getDate()}</button>)}</div>
+        <div className="calendar-grid header-row"><div className="time-head"/>{weekDays.map(d=>{const key=toDateKey(d);return <button className={`day-head day-button ${isCompanyHoliday(key)?'company-holiday':''}`} type="button" key={key} onClick={()=>{setSelectedDate(key);setViewMode('day')}}>{jpDays[d.getDay()]} {d.getDate()}{isCompanyHoliday(key)&&<span className="holiday-badge">休業日</span>}</button>})}</div>
         {times.map(time=><div className="calendar-grid time-row" key={time}>
           <div className="time-label">{time}</div>
           {weekDays.map(d=>{
             const date=toDateKey(d)
             const items=visibleEvents.filter(x=>occursOn(x,date) && (x.allDay || x.startTime.startsWith(time.slice(0,2))))
             return <div
-              className={`slot clickable ${isTimeInDragRange(date,time)?'time-selecting':''}`}
+              className={`slot clickable ${isTimeInDragRange(date,time)?'time-selecting':''} ${isCompanyHoliday(date)?'company-holiday':''}`}
               key={date+time}
               onMouseDown={(e)=>{if(e.button===0){e.preventDefault();beginTimeSelection(date,time)}}}
               onMouseEnter={()=>extendTimeSelection(date,time)}
               onMouseUp={()=>finishTimeSelection(date,time)}
-            >{items.map(item=><button className={`event-card ${categoryClass(item.category)}`} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.allDay?'終日':`${item.startTime}〜${item.endTime}`}・{categoryLabels[item.category]}</span><span>{item.location||item.participants||scopeLabels[item.scope]}</span></button>)}</div>
+            >{items.map(item=><button className={`event-card ${categoryClass(item.category)}`} style={eventPersonalStyle(item)} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.allDay?'終日':`${item.startTime}〜${item.endTime}`}・{categoryLabels[item.category]}</span><span>{item.location||item.participants||scopeLabels[item.scope]}</span></button>)}</div>
           })}
         </div>)}
       </section>}
 
-      {viewMode==='day'&&<section className="calendar-card day-view" aria-label="日カレンダー">
-        <div className="day-view-head"><strong>{jpDays[selected.getDay()]} {selected.getMonth()+1}/{selected.getDate()}</strong><span>{visibleEvents.filter(e=>occursOn(e,selectedDate)).length}件</span></div>
+      {viewMode==='day'&&<section className={`calendar-card day-view ${isCompanyHoliday(selectedDate)?'company-holiday':''}`} aria-label="日カレンダー">
+        <div className="day-view-head"><strong>{jpDays[selected.getDay()]} {selected.getMonth()+1}/{selected.getDate()} {isCompanyHoliday(selectedDate)&&<span className="holiday-badge">休業日</span>}</strong><span>{visibleEvents.filter(e=>occursOn(e,selectedDate)).length}件</span></div>
         <div className="all-day-row">
           <div className="time-label">終日</div>
-          <div className="slot">{visibleEvents.filter(e=>occursOn(e,selectedDate)&&e.allDay).map(item=><button className={`event-card wide ${categoryClass(item.category)}`} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{categoryLabels[item.category]}・{scopeLabels[item.scope]}</span></button>)}</div>
+          <div className="slot">{visibleEvents.filter(e=>occursOn(e,selectedDate)&&e.allDay).map(item=><button className={`event-card wide ${categoryClass(item.category)}`} style={eventPersonalStyle(item)} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{categoryLabels[item.category]}・{scopeLabels[item.scope]}</span></button>)}</div>
         </div>
         {times.map(time=>{
           const items=visibleEvents.filter(e=>occursOn(e,selectedDate)&&!e.allDay&&e.startTime.startsWith(time.slice(0,2)))
           return <div className="day-row" key={time}><div className="time-label">{time}</div><div
-            className={`slot clickable ${isTimeInDragRange(selectedDate,time)?'time-selecting':''}`}
+            className={`slot clickable ${isTimeInDragRange(selectedDate,time)?'time-selecting':''} ${isCompanyHoliday(selectedDate)?'company-holiday':''}`}
             onMouseDown={(e)=>{if(e.button===0){e.preventDefault();beginTimeSelection(selectedDate,time)}}}
             onMouseEnter={()=>extendTimeSelection(selectedDate,time)}
             onMouseUp={()=>finishTimeSelection(selectedDate,time)}
-          >{items.map(item=><button className={`event-card wide ${categoryClass(item.category)}`} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.startTime}〜{item.endTime}　{categoryLabels[item.category]}　{item.location||''}</span></button>)}</div></div>
+          >{items.map(item=><button className={`event-card wide ${categoryClass(item.category)}`} style={eventPersonalStyle(item)} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.startTime}〜{item.endTime}　{categoryLabels[item.category]}　{item.location||''}</span></button>)}</div></div>
         })}
       </section>}
 
@@ -487,15 +516,15 @@ export default function Home(){
           return <div
             role="button"
             tabIndex={0}
-            className={`month-cell ${date.getMonth()!==selected.getMonth()?'outside':''} ${isDateInDragRange(key)?'range-selecting':''}`}
+            className={`month-cell ${date.getMonth()!==selected.getMonth()?'outside':''} ${isDateInDragRange(key)?'range-selecting':''} ${isCompanyHoliday(key)?'company-holiday':''}`}
             key={key}
             onMouseDown={(e)=>{ if(e.button===0){ e.preventDefault(); beginMonthSelection(key) } }}
             onMouseEnter={()=>extendMonthSelection(key)}
             onMouseUp={()=>finishMonthSelection(key)}
             onKeyDown={(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openNewEvent(key) } }}
           >
-            <span className="month-day-num">{date.getDate()}</span>
-            <span className="month-events">{all.slice(0,5).map(item=><span className={`month-event ${categoryClass(item.category)}`} key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={(e)=>{e.stopPropagation();openEventDetail(item)}}>{item.allDay?'':item.startTime+' '}{item.title}</span>)}{all.length>5&&<span className="more">他 {all.length-5}件</span>}</span>
+            <span className="month-day-num">{date.getDate()}{isCompanyHoliday(key)&&<span className="holiday-badge">休業日</span>}</span>
+            <span className="month-events">{all.slice(0,5).map(item=><span className={`month-event ${categoryClass(item.category)}`} style={eventPersonalStyle(item)} key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={(e)=>{e.stopPropagation();openEventDetail(item)}}>{item.allDay?'':item.startTime+' '}{item.title}</span>)}{all.length>5&&<span className="more">他 {all.length-5}件</span>}</span>
           </div>
         })}</div>
       </section>}
@@ -567,7 +596,7 @@ export default function Home(){
       <div className="employee-list">
         {filteredEmployees.map((employee)=><label className="employee-row" key={employee.id}>
           <input type="checkbox" checked={selectedEmployeeIds.includes(employee.id)} onChange={()=>toggleEmployee(employee.id)}/>
-          <span><strong>{employee.name}</strong><small>{employee.department||'部署未設定'}　{employee.email}</small></span>
+          <span><strong><i className="employee-color-dot" style={{background:employee.color}}/> {employee.name}</strong><small>{[employee.division,employee.group].filter(Boolean).join(' / ')||employee.department||'所属未設定'}　{employee.email}</small></span>
         </label>)}
         {filteredEmployees.length===0&&<div className="empty-panel">該当する社員がありません。</div>}
       </div>
@@ -581,13 +610,14 @@ export default function Home(){
         <input name="employeeEmail" type="email" required placeholder="メールアドレス" defaultValue={editingEmployee?.email||''}/>
         <input name="employeeDivision" placeholder="ディビジョン" defaultValue={editingEmployee?.division||''}/>
         <input name="employeeGroup" placeholder="グループ" defaultValue={editingEmployee?.group||editingEmployee?.department||''}/>
+        <label className="employee-color-field"><span>個人色</span><input name="employeeColor" type="color" defaultValue={editingEmployee?.color||'#2463a8'}/></label>
         <button type="submit" className="btn primary" disabled={employeeState==='saving'}>{employeeState==='saving'?'保存中…':editingEmployee?'更新':'社員を追加'}</button>
         {editingEmployee&&<button type="button" className="btn secondary" onClick={()=>setEditingEmployee(null)}>編集取消</button>}
       </form>
       {employeeState==='error'&&<div className="error">社員マスタの保存に失敗しました。<br/><small>エラー：{employeeError||'詳細不明'}</small></div>}
       <div className="employee-list master-list">
         {employees.map((employee)=><div className="employee-row master-row" key={employee.id}>
-          <span><strong>{employee.name}</strong><small>{[employee.division,employee.group].filter(Boolean).join(' / ')||employee.department||'所属未設定'}　{employee.email}</small></span>
+          <span><strong><i className="employee-color-dot" style={{background:employee.color}}/> {employee.name}</strong><small>{[employee.division,employee.group].filter(Boolean).join(' / ')||employee.department||'所属未設定'}　{employee.email}</small></span>
           <div className="employee-row-actions"><button type="button" className="btn secondary" onClick={()=>startEditEmployee(employee)}>修正</button><button type="button" className="btn danger" onClick={()=>removeEmployee(employee)}>削除</button></div>
         </div>)}
       </div>
@@ -598,7 +628,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.3.1</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.3.2</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

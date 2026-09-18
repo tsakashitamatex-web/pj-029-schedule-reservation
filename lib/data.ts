@@ -8,7 +8,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore'
-import { db } from './firebase'
+import { getDb } from './firebase'
 
 export type CalendarEventInput = {
   title: string
@@ -43,6 +43,7 @@ export function overlaps(startA: string, endA: string, startB: string, endB: str
 }
 
 export async function checkReservationConflict(input: Pick<CalendarEventInput, 'resource' | 'date' | 'startTime' | 'endTime'>) {
+  const db = await getDb()
   if (!db || !input.resource) return null
 
   const q = query(
@@ -63,6 +64,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     throw new Error('END_BEFORE_START')
   }
 
+  const db = await getDb()
   if (!db) return { id: `demo-${Date.now()}`, demo: true as const }
 
   const conflict = await checkReservationConflict(input)
@@ -115,23 +117,35 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
 }
 
 export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]) => void): Unsubscribe {
-  if (!db) {
-    onChange([])
-    return () => undefined
-  }
+  let unsubscribe: Unsubscribe = () => undefined
+  let active = true
 
-  const q = query(collection(db, 'events'), where('status', '==', 'active'))
-  return onSnapshot(q, (snapshot) => {
+  getDb().then((db) => {
+    if (!active) return
+    if (!db) {
+      onChange([])
+      return
+    }
+
+    const q = query(collection(db, 'events'), where('status', '==', 'active'))
+    unsubscribe = onSnapshot(q, (snapshot) => {
     const events = snapshot.docs.map((doc) => ({
       id: doc.id,
       externalParticipants: '',
       ...(doc.data() as CalendarEventInput & { status?: string }),
     }))
     onChange(events)
+    })
   })
+
+  return () => {
+    active = false
+    unsubscribe()
+  }
 }
 
 export async function saveFeedback(input: FeedbackInput) {
+  const db = await getDb()
   if (!db) return { id: `demo-${Date.now()}`, demo: true as const }
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,

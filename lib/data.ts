@@ -1,11 +1,14 @@
 import {
   addDoc,
   collection,
+  doc,
   getDocs,
   onSnapshot,
   query,
   serverTimestamp,
+  updateDoc,
   where,
+  writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore'
 import { ensureSignedIn, getDb } from './firebase'
@@ -49,7 +52,10 @@ export function overlaps(startA: string, endA: string, startB: string, endB: str
   return minutes(startA) < minutes(endB) && minutes(startB) < minutes(endA)
 }
 
-export async function checkReservationConflict(input: Pick<CalendarEventInput, 'resource' | 'date' | 'startTime' | 'endTime'>) {
+export async function checkReservationConflict(
+  input: Pick<CalendarEventInput, 'resource' | 'date' | 'startTime' | 'endTime'>,
+  excludeEventId?: string,
+) {
   const signedIn = await ensureSignedIn()
   const db = await getDb()
   if (!signedIn || !db || !input.resource) return null
@@ -61,8 +67,9 @@ export async function checkReservationConflict(input: Pick<CalendarEventInput, '
   )
   const snapshot = await getDocs(q)
   const conflict = snapshot.docs
-    .map((doc) => ({ id: doc.id, ...doc.data() } as { id: string; startTime?: string; endTime?: string; status?: string }))
-    .find((row) => row.status !== 'cancelled' && row.startTime && row.endTime && overlaps(input.startTime, input.endTime, row.startTime, row.endTime))
+    .map((doc) => ({ id: doc.id, ...doc.data() } as { id: string; eventId?: string; startTime?: string; endTime?: string; status?: string }))
+    .filter((row) => !excludeEventId || row.eventId !== excludeEventId)
+    .find((row) => row.status !== 'cancelled' && row.startTime && row.endTime && row.id && overlaps(input.startTime, input.endTime, row.startTime, row.endTime))
 
   return conflict ?? null
 }
@@ -84,7 +91,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.1.3',
+    version: '0.2.1',
   })
 
   const writes: Promise<unknown>[] = []
@@ -123,6 +130,102 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
 
   await Promise.all(writes)
   return { id: eventRef.id, demo: false as const }
+}
+
+
+export async function updateCalendarEvent(eventId: string, input: CalendarEventInput) {
+  if (!input.allDay && minutes(input.endTime) <= minutes(input.startTime)) {
+    throw new Error('END_BEFORE_START')
+  }
+
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+
+  const conflict = input.allDay ? null : await checkReservationConflict(input, eventId)
+  if (conflict) throw new Error('RESERVATION_CONFLICT')
+
+  const reservationQuery = query(collection(db, 'reservations'), where('eventId', '==', eventId))
+  const reservationSnapshot = await getDocs(reservationQuery)
+  const batch = writeBatch(db)
+
+  batch.update(doc(db, 'events', eventId), {
+    ...input,
+    updatedAt: serverTimestamp(),
+    version: '0.2.1',
+  })
+
+  reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
+
+  if (input.resource) {
+    const reservationRef = doc(collection(db, 'reservations'))
+    batch.set(reservationRef, {
+      eventId,
+      resourceName: input.resource,
+      date: input.date,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      status: 'active',
+    })
+  }
+
+  await batch.commit()
+
+  const writes: Promise<unknown>[] = []
+  if (input.notifyEmail) {
+    writes.push(addDoc(collection(db, 'notifications'), {
+      eventId,
+      channel: 'email',
+      type: 'event_updated',
+      status: 'pending',
+      createdAt: serverTimestamp(),
+    }))
+  }
+  if (input.notifyTeams) {
+    writes.push(addDoc(collection(db, 'notifications'), {
+      eventId,
+      channel: 'teams',
+      type: 'event_updated',
+      status: 'pending_user_send',
+      createdAt: serverTimestamp(),
+    }))
+  }
+  await Promise.all(writes)
+}
+
+export async function cancelCalendarEvent(eventId: string) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+
+  const reservationQuery = query(collection(db, 'reservations'), where('eventId', '==', eventId))
+  const reservationSnapshot = await getDocs(reservationQuery)
+  const batch = writeBatch(db)
+
+  batch.update(doc(db, 'events', eventId), {
+    status: 'cancelled',
+    updatedAt: serverTimestamp(),
+    cancelledAt: serverTimestamp(),
+    version: '0.2.1',
+  })
+
+  reservationSnapshot.docs.forEach((reservationDoc) => {
+    batch.update(reservationDoc.ref, {
+      status: 'cancelled',
+      updatedAt: serverTimestamp(),
+    })
+  })
+
+  await batch.commit()
+  await addDoc(collection(db, 'notifications'), {
+    eventId,
+    channel: 'system',
+    type: 'event_cancelled',
+    status: 'logged',
+    createdAt: serverTimestamp(),
+  })
 }
 
 export function subscribeCalendarEvents(onChange: (events: CalendarEventRecord[]) => void): Unsubscribe {
@@ -178,7 +281,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.1.3',
+    appVersion: '0.2.1',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

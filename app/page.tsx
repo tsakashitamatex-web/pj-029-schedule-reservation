@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, saveCalendarEvent, saveFeedback, subscribeCalendarEvents, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord } from '../lib/data'
+import { cancelCalendarEvent, saveCalendarEvent, saveEmployee, saveFeedback, subscribeCalendarEvents, subscribeEmployees, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 
@@ -69,6 +69,16 @@ export default function Home(){
   const [showCompany,setShowCompany]=useState(true)
   const [showPersonal,setShowPersonal]=useState(true)
   const [showDepartment,setShowDepartment]=useState(true)
+  const [employees,setEmployees]=useState<EmployeeRecord[]>([])
+  const [employeePickerOpen,setEmployeePickerOpen]=useState(false)
+  const [selectedEmployeeIds,setSelectedEmployeeIds]=useState<string[]>([])
+  const [employeeSearch,setEmployeeSearch]=useState('')
+  const [employeeMasterOpen,setEmployeeMasterOpen]=useState(false)
+  const [employeeState,setEmployeeState]=useState<'idle'|'saving'|'error'>('idle')
+  const [timeDragDate,setTimeDragDate]=useState<string | null>(null)
+  const [timeDragStart,setTimeDragStart]=useState<string | null>(null)
+  const [timeDragEnd,setTimeDragEnd]=useState<string | null>(null)
+  const [isTimeDragging,setIsTimeDragging]=useState(false)
   const [draftStartDate,setDraftStartDate]=useState(todayKey())
   const [draftEndDate,setDraftEndDate]=useState(todayKey())
   const [draftAllDay,setDraftAllDay]=useState(false)
@@ -96,9 +106,12 @@ export default function Home(){
         setLoadState('デモ')
       })
 
+    const stopEmployees = subscribeEmployees(setEmployees)
+
     return ()=>{
       active = false
       stop()
+      stopEmployees()
     }
   },[])
 
@@ -108,6 +121,21 @@ export default function Home(){
   const monthGridStart=startOfWeek(new Date(selected.getFullYear(),selected.getMonth(),1))
   const monthDays=Array.from({length:42},(_,i)=>addDays(monthGridStart,i))
   const connectionText=useMemo(()=>firebaseConfigured?`Firestore ${loadState}`:loadState==='確認中'?'接続確認中':'デモモード：Firebase設定待ち',[firebaseConfigured,loadState])
+
+  const selectedEmployees = useMemo(
+    () => employees.filter((employee) => selectedEmployeeIds.includes(employee.id)),
+    [employees, selectedEmployeeIds],
+  )
+
+  const filteredEmployees = useMemo(() => {
+    const q = employeeSearch.trim().toLowerCase()
+    if (!q) return employees
+    return employees.filter((employee) =>
+      employee.name.toLowerCase().includes(q) ||
+      employee.email.toLowerCase().includes(q) ||
+      employee.department.toLowerCase().includes(q)
+    )
+  }, [employees, employeeSearch])
 
   const visibleEvents = useMemo(() => events.filter((event) => {
     if (event.scope === 'company') return showCompany
@@ -130,6 +158,7 @@ export default function Home(){
     setEventState('idle')
     setEventError('')
     setEditingEvent(null)
+    setSelectedEmployeeIds([])
     setEventOpen(true)
     requestAnimationFrame(()=>{
       const timeInput=document.querySelector<HTMLInputElement>('input[name="startTime"]')
@@ -167,6 +196,65 @@ export default function Home(){
     return start <= date && date <= end
   }
 
+  function timeIndex(time:string){ return times.indexOf(time) }
+
+  function beginTimeSelection(date:string,time:string){
+    setTimeDragDate(date)
+    setTimeDragStart(time)
+    setTimeDragEnd(time)
+    setIsTimeDragging(true)
+  }
+
+  function extendTimeSelection(date:string,time:string){
+    if (!isTimeDragging || timeDragDate !== date || !timeDragStart) return
+    setTimeDragEnd(time)
+  }
+
+  function finishTimeSelection(date:string,time:string){
+    if (!isTimeDragging || timeDragDate !== date || !timeDragStart) return
+    const a=timeIndex(timeDragStart)
+    const b=timeIndex(time)
+    const start=times[Math.min(a,b)]
+    const last=times[Math.max(a,b)]
+    setIsTimeDragging(false)
+    setTimeDragDate(null)
+    setTimeDragStart(null)
+    setTimeDragEnd(null)
+    openNewEvent(date,start,date,false)
+    requestAnimationFrame(()=>{
+      const endTimeInput=document.querySelector<HTMLInputElement>('input[name="endTime"]')
+      if(endTimeInput) endTimeInput.value=addOneHour(last)
+    })
+  }
+
+  function isTimeInDragRange(date:string,time:string){
+    if(!isTimeDragging || timeDragDate!==date || !timeDragStart || !timeDragEnd) return false
+    const a=timeIndex(timeDragStart), b=timeIndex(timeDragEnd), x=timeIndex(time)
+    return Math.min(a,b)<=x && x<=Math.max(a,b)
+  }
+
+  function toggleEmployee(id:string){
+    setSelectedEmployeeIds((prev)=>prev.includes(id)?prev.filter((x)=>x!==id):[...prev,id])
+  }
+
+  async function submitEmployee(e:FormEvent<HTMLFormElement>){
+    e.preventDefault()
+    setEmployeeState('saving')
+    const form=new FormData(e.currentTarget)
+    try{
+      await saveEmployee({
+        name:String(form.get('employeeName')||''),
+        email:String(form.get('employeeEmail')||''),
+        department:String(form.get('employeeDepartment')||''),
+        active:true,
+      })
+      e.currentTarget.reset()
+      setEmployeeState('idle')
+    }catch{
+      setEmployeeState('error')
+    }
+  }
+
   function openEventDetail(event: UiEvent){
     setSelectedEvent(event)
     setDetailOpen(true)
@@ -181,6 +269,11 @@ export default function Home(){
     setDraftStartDate(event.date)
     setDraftEndDate(event.endDate || event.date)
     setDraftAllDay(event.allDay)
+    setSelectedEmployeeIds(
+      event.participantIds?.length
+        ? event.participantIds
+        : employees.filter((employee)=>event.participantEmails?.includes(employee.email)).map((employee)=>employee.id)
+    )
     setEventOpen(true)
   }
 
@@ -213,7 +306,9 @@ export default function Home(){
       category:String(form.get('category')||'other') as CalendarEventInput['category'],
       scope:String(form.get('scope')||'personal') as CalendarEventInput['scope'],
       source:'pj029',
-      participants:String(form.get('participants')||''),
+      participants:selectedEmployees.map((employee)=>employee.name).join('・'),
+      participantIds:selectedEmployees.map((employee)=>employee.id),
+      participantEmails:selectedEmployees.map((employee)=>employee.email),
       externalParticipants:String(form.get('externalParticipants')||''),
       location:String(form.get('location')||''),
       description:String(form.get('description')||''),
@@ -274,11 +369,12 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.2.4</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.3.0</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
-        <button className="btn secondary" type="button" onClick={()=>setNotice('設備予約専用画面はPJ-020の予約機能を統合予定です。')}>設備予約</button>
+        <button className="btn secondary" type="button" onClick={()=>setEmployeeMasterOpen(true)}>社員マスタ</button>
+        <button className="btn secondary" type="button" onClick={()=>setNotice('設備予約は通常の予定登録画面から行います。')}>設備予約</button>
         <button className="btn primary" type="button" onClick={()=>openNewEvent()}>＋ 予定を作成</button>
       </div>
     </header>
@@ -324,7 +420,13 @@ export default function Home(){
           {weekDays.map(d=>{
             const date=toDateKey(d)
             const items=visibleEvents.filter(x=>occursOn(x,date) && (x.allDay || x.startTime.startsWith(time.slice(0,2))))
-            return <div className="slot clickable" key={date+time} onDoubleClick={()=>openNewEvent(date,time)}>{items.map(item=><button className={`event-card ${categoryClass(item.category)}`} type="button" key={item.id} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.allDay?'終日':`${item.startTime}〜${item.endTime}`}・{categoryLabels[item.category]}</span><span>{item.location||item.participants||scopeLabels[item.scope]}</span></button>)}</div>
+            return <div
+              className={`slot clickable ${isTimeInDragRange(date,time)?'time-selecting':''}`}
+              key={date+time}
+              onMouseDown={(e)=>{if(e.button===0){e.preventDefault();beginTimeSelection(date,time)}}}
+              onMouseEnter={()=>extendTimeSelection(date,time)}
+              onMouseUp={()=>finishTimeSelection(date,time)}
+            >{items.map(item=><button className={`event-card ${categoryClass(item.category)}`} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.allDay?'終日':`${item.startTime}〜${item.endTime}`}・{categoryLabels[item.category]}</span><span>{item.location||item.participants||scopeLabels[item.scope]}</span></button>)}</div>
           })}
         </div>)}
       </section>}
@@ -333,11 +435,16 @@ export default function Home(){
         <div className="day-view-head"><strong>{jpDays[selected.getDay()]} {selected.getMonth()+1}/{selected.getDate()}</strong><span>{visibleEvents.filter(e=>occursOn(e,selectedDate)).length}件</span></div>
         <div className="all-day-row">
           <div className="time-label">終日</div>
-          <div className="slot">{visibleEvents.filter(e=>occursOn(e,selectedDate)&&e.allDay).map(item=><button className={`event-card wide ${categoryClass(item.category)}`} type="button" key={item.id} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{categoryLabels[item.category]}・{scopeLabels[item.scope]}</span></button>)}</div>
+          <div className="slot">{visibleEvents.filter(e=>occursOn(e,selectedDate)&&e.allDay).map(item=><button className={`event-card wide ${categoryClass(item.category)}`} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{categoryLabels[item.category]}・{scopeLabels[item.scope]}</span></button>)}</div>
         </div>
         {times.map(time=>{
           const items=visibleEvents.filter(e=>occursOn(e,selectedDate)&&!e.allDay&&e.startTime.startsWith(time.slice(0,2)))
-          return <div className="day-row" key={time}><div className="time-label">{time}</div><div className="slot clickable" onDoubleClick={()=>openNewEvent(selectedDate,time)}>{items.map(item=><button className={`event-card wide ${categoryClass(item.category)}`} type="button" key={item.id} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.startTime}〜{item.endTime}　{categoryLabels[item.category]}　{item.location||''}</span></button>)}</div></div>
+          return <div className="day-row" key={time}><div className="time-label">{time}</div><div
+            className={`slot clickable ${isTimeInDragRange(selectedDate,time)?'time-selecting':''}`}
+            onMouseDown={(e)=>{if(e.button===0){e.preventDefault();beginTimeSelection(selectedDate,time)}}}
+            onMouseEnter={()=>extendTimeSelection(selectedDate,time)}
+            onMouseUp={()=>finishTimeSelection(selectedDate,time)}
+          >{items.map(item=><button className={`event-card wide ${categoryClass(item.category)}`} type="button" key={item.id} onMouseDown={(e)=>e.stopPropagation()} onClick={()=>openEventDetail(item)}><strong>{item.title}</strong><span>{item.startTime}〜{item.endTime}　{categoryLabels[item.category]}　{item.location||''}</span></button>)}</div></div>
         })}
       </section>}
 
@@ -391,7 +498,16 @@ export default function Home(){
         <label className="check-field"><input name="allDay" type="checkbox" defaultChecked={editingEvent?.allDay??draftAllDay}/> 終日予定</label>
         <div className="form-grid four"><label className="field">開始日<input name="date" type="date" required defaultValue={editingEvent?.date||draftStartDate}/></label><label className="field">終了日<input name="endDate" type="date" required defaultValue={editingEvent?.endDate||editingEvent?.date||draftEndDate}/></label><label className="field">開始<input name="startTime" type="time" defaultValue={editingEvent?.startTime||"10:00"}/></label><label className="field">終了<input name="endTime" type="time" defaultValue={editingEvent?.endTime||"11:00"}/></label></div>
         <label className="field">場所<input name="location" placeholder="例：JFE倉敷、東京本社、Web" defaultValue={editingEvent?.location||''}/></label>
-        <label className="field">社内参加者<input name="participants" placeholder="例：坂下・岩井" defaultValue={editingEvent?.participants||''}/></label>
+        <div className="field">
+          <span>社内参加者</span>
+          <div className="participant-selector">
+            <div className="participant-tags">
+              {selectedEmployees.length===0&&<span className="participant-empty">未選択</span>}
+              {selectedEmployees.map((employee)=><button type="button" className="participant-tag" key={employee.id} onClick={()=>toggleEmployee(employee.id)}>{employee.name} ×</button>)}
+            </div>
+            <button type="button" className="btn secondary" onClick={()=>setEmployeePickerOpen(true)}>＋ 社内参加者を選択</button>
+          </div>
+        </div>
         <label className="field">外部参加者・来訪者<input name="externalParticipants" placeholder="例：ABC社 田中様" defaultValue={editingEvent?.externalParticipants||''}/></label>
         <div className="form-grid two">
           <label className="field">会議室（必要な場合のみ）
@@ -406,11 +522,39 @@ export default function Home(){
           </label>
         </div>
         <label className="field">詳細<textarea name="description" rows={3} placeholder="目的、工事内容、訪問先、連絡事項など" defaultValue={editingEvent?.description||''}/></label>
-        <div className="check-row"><label><input name="notifyEmail" type="checkbox" defaultChecked={editingEvent?.notifyEmail||false}/> メール通知</label><label><input name="notifyTeams" type="checkbox" defaultChecked={editingEvent?.notifyTeams||false}/> Teams通知（来客会議室予約）</label></div>
+        <div className="check-row"><label><input name="notifyEmail" type="checkbox" defaultChecked={editingEvent?.notifyEmail||false}/> 選択した社内参加者へメール通知</label><label><input name="notifyTeams" type="checkbox" defaultChecked={editingEvent?.notifyTeams||false}/> Teams通知（来客会議室予約）</label></div>
         {eventState==='conflict'&&<div className="error">この設備は指定時間帯に既に予約されています。時間または設備を変更してください。</div>}
         {eventState==='error'&&<div className="error">保存に失敗しました。<br/><small>エラー：{eventError || '詳細不明'}</small></div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setEventOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={eventState==='saving'}>{eventState==='saving'?'保存中…':editingEvent?'更新する':'登録する'}</button></div>
       </form>}
+    </div></div>}
+
+
+    {employeePickerOpen&&<div className="modal-backdrop" onMouseDown={()=>setEmployeePickerOpen(false)}><div className="modal employee-picker-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
+      <div className="modal-head"><div><div className="eyebrow">社員マスタから複数選択</div><h2>社内参加者を選択</h2></div><button className="icon-btn" type="button" onClick={()=>setEmployeePickerOpen(false)}>×</button></div>
+      <input className="employee-search" value={employeeSearch} onChange={e=>setEmployeeSearch(e.target.value)} placeholder="氏名・メール・部署で検索"/>
+      <div className="employee-list">
+        {filteredEmployees.map((employee)=><label className="employee-row" key={employee.id}>
+          <input type="checkbox" checked={selectedEmployeeIds.includes(employee.id)} onChange={()=>toggleEmployee(employee.id)}/>
+          <span><strong>{employee.name}</strong><small>{employee.department||'部署未設定'}　{employee.email}</small></span>
+        </label>)}
+        {filteredEmployees.length===0&&<div className="empty-panel">該当する社員がありません。</div>}
+      </div>
+      <div className="modal-actions"><button type="button" className="btn primary" onClick={()=>setEmployeePickerOpen(false)}>選択完了（{selectedEmployeeIds.length}名）</button></div>
+    </div></div>}
+
+    {employeeMasterOpen&&<div className="modal-backdrop" onMouseDown={()=>setEmployeeMasterOpen(false)}><div className="modal employee-master-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
+      <div className="modal-head"><div><div className="eyebrow">氏名とメールアドレスを管理</div><h2>社員マスタ</h2></div><button className="icon-btn" type="button" onClick={()=>setEmployeeMasterOpen(false)}>×</button></div>
+      <form className="employee-master-form" onSubmit={submitEmployee}>
+        <input name="employeeName" required placeholder="氏名"/>
+        <input name="employeeEmail" type="email" required placeholder="メールアドレス"/>
+        <input name="employeeDepartment" placeholder="部署"/>
+        <button type="submit" className="btn primary" disabled={employeeState==='saving'}>{employeeState==='saving'?'登録中…':'社員を追加'}</button>
+      </form>
+      {employeeState==='error'&&<div className="error">社員マスタの保存に失敗しました。</div>}
+      <div className="employee-list master-list">
+        {employees.map((employee)=><div className="employee-row" key={employee.id}><span><strong>{employee.name}</strong><small>{employee.department||'部署未設定'}　{employee.email}</small></span></div>)}
+      </div>
     </div></div>}
 
     {feedbackOpen&&<div className="modal-backdrop" onMouseDown={()=>setFeedbackOpen(false)}><div className="modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}>
@@ -418,7 +562,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.2.4</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.3.0</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

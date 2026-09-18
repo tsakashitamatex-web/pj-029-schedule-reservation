@@ -25,7 +25,8 @@ const scopeLabels: Record<CalendarEventInput['scope'], string> = {
   company: '全社',
 }
 
-const resources = ['', '第1会議室', '第2会議室', '社用車A']
+const meetingRooms = ['', '第1会議室', '第2会議室']
+const vehicles = ['', '社用車A']
 const times = ['9:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00']
 const jpDays = ['日','月','火','水','木','金','土']
 
@@ -173,7 +174,9 @@ export default function Home(){
       externalParticipants:String(form.get('externalParticipants')||''),
       location:String(form.get('location')||''),
       description:String(form.get('description')||''),
-      resource:String(form.get('resource')||''),
+      resource:String(form.get('meetingRoom')||form.get('vehicle')||''),
+      meetingRoom:String(form.get('meetingRoom')||''),
+      vehicle:String(form.get('vehicle')||''),
       notifyEmail:form.get('notifyEmail')==='on',
       notifyTeams:form.get('notifyTeams')==='on',
     }
@@ -201,7 +204,7 @@ export default function Home(){
       }
       setNotice(message)
     }catch(err){
-      if (err instanceof Error && err.message==='RESERVATION_CONFLICT') {
+      if (err instanceof Error && err.message.startsWith('RESERVATION_CONFLICT')) {
         setEventState('conflict')
         return
       }
@@ -228,7 +231,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.2.1</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.2.2</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -316,7 +319,7 @@ export default function Home(){
         <div><span>場所</span><strong>{selectedEvent.location||'未設定'}</strong></div>
         <div><span>社内参加者</span><strong>{selectedEvent.participants||'未設定'}</strong></div>
         <div><span>外部参加者・来訪者</span><strong>{selectedEvent.externalParticipants||'なし'}</strong></div>
-        <div><span>設備予約</span><strong>{selectedEvent.resource||'なし'}</strong></div>
+        <div><span>会議室</span><strong>{selectedEvent.meetingRoom||((selectedEvent.resource||'').includes('会議室')?selectedEvent.resource:'なし')}</strong></div><div><span>社用車</span><strong>{selectedEvent.vehicle||((selectedEvent.resource||'').includes('社用車')?selectedEvent.resource:'なし')}</strong></div>
         <div><span>公開範囲</span><strong>{scopeLabels[selectedEvent.scope]}</strong></div>
       </div>
       {selectedEvent.description&&<div className="detail-description"><span>詳細</span><p>{selectedEvent.description}</p></div>}
@@ -338,7 +341,18 @@ export default function Home(){
         <label className="field">場所<input name="location" placeholder="例：JFE倉敷、東京本社、Web" defaultValue={editingEvent?.location||''}/></label>
         <label className="field">社内参加者<input name="participants" placeholder="例：坂下・岩井" defaultValue={editingEvent?.participants||''}/></label>
         <label className="field">外部参加者・来訪者<input name="externalParticipants" placeholder="例：ABC社 田中様" defaultValue={editingEvent?.externalParticipants||''}/></label>
-        <label className="field">会議室・社用車（必要な場合のみ）<select name="resource" defaultValue={editingEvent?.resource||""}>{resources.map(r=><option value={r} key={r||'none'}>{r||'使用しない'}</option>)}</select></label>
+        <div className="form-grid two">
+          <label className="field">会議室（必要な場合のみ）
+            <select name="meetingRoom" defaultValue={editingEvent?.meetingRoom||((editingEvent?.resource||'').includes('会議室')?editingEvent?.resource:'')}>
+              {meetingRooms.map(r=><option value={r} key={r||'none'}>{r||'使用しない'}</option>)}
+            </select>
+          </label>
+          <label className="field">社用車（必要な場合のみ）
+            <select name="vehicle" defaultValue={editingEvent?.vehicle||((editingEvent?.resource||'').includes('社用車')?editingEvent?.resource:'')}>
+              {vehicles.map(r=><option value={r} key={r||'none'}>{r||'使用しない'}</option>)}
+            </select>
+          </label>
+        </div>
         <label className="field">詳細<textarea name="description" rows={3} placeholder="目的、工事内容、訪問先、連絡事項など" defaultValue={editingEvent?.description||''}/></label>
         <div className="check-row"><label><input name="notifyEmail" type="checkbox" defaultChecked={editingEvent?.notifyEmail||false}/> メール通知</label><label><input name="notifyTeams" type="checkbox" defaultChecked={editingEvent?.notifyTeams||false}/> Teams通知（来客会議室予約）</label></div>
         {eventState==='conflict'&&<div className="error">この設備は指定時間帯に既に予約されています。時間または設備を変更してください。</div>}
@@ -352,7 +366,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.2.1</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.2.2</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

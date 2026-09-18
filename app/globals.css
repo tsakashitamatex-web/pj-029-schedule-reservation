@@ -62,3 +62,10 @@
 .employee-master-form{grid-template-columns:1fr 1.25fr .9fr .9fr auto auto}.master-row{justify-content:space-between}.employee-row-actions{display:flex;gap:8px;align-items:center;flex-shrink:0}
 @media(max-width:980px){.employee-master-form{grid-template-columns:1fr 1fr}.employee-row-actions{flex-wrap:wrap}}
 @media(max-width:760px){.employee-master-form{grid-template-columns:1fr}.master-row{align-items:flex-start;flex-direction:column}.employee-row-actions{width:100%}}
+
+/* Company calendar colors aligned with PJ-020 */
+.company-holiday{background:#fff1f2!important}.slot.company-holiday{background:#fff5f5!important}.day-view.company-holiday .day-view-head{background:#fff1f2}.holiday-badge{display:inline-flex;align-items:center;justify-content:center;margin-left:6px;padding:1px 6px;border-radius:999px;background:#fecaca;color:#b91c1c;font-size:10px;font-weight:700;line-height:1.5;vertical-align:middle}.month-weekdays>div:nth-child(6){color:#2563eb}.month-weekdays>div:nth-child(7){color:#dc2626}.month-cell.company-holiday .month-day-num,.day-head.company-holiday{color:#b91c1c}
+.employee-color-dot{display:inline-block;width:10px;height:10px;border-radius:999px;vertical-align:middle;margin-right:4px}.employee-color-field{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;padding:7px 9px;background:#fff}.employee-color-field span{font-size:12px;color:var(--muted);white-space:nowrap}.employee-color-field input[type="color"]{width:42px;height:32px;padding:2px;border:0;background:transparent;cursor:pointer}.month-event[style]{border-left:4px solid transparent}
+.employee-master-form{grid-template-columns:1fr 1.25fr .9fr .9fr auto auto auto}
+@media(max-width:1100px){.employee-master-form{grid-template-columns:1fr 1fr 1fr}}
+@media(max-width:760px){.employee-master-form{grid-template-columns:1fr}}

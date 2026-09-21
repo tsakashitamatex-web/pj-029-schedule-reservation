@@ -4,7 +4,7 @@ import { getRuntimeConfig } from './firebase'
 export function shouldOpenTeams(input: CalendarEventInput) {
   return Boolean(
     input.notifyTeams &&
-    input.resource.includes('会議室') &&
+    Boolean(input.meetingRoom) &&
     input.externalParticipants.trim(),
   )
 }

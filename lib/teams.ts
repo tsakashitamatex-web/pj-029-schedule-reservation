@@ -40,9 +40,9 @@ function fallbackCopyText(value: string) {
   return ok
 }
 
-export async function openTeamsNotification(input: CalendarEventInput) {
+export async function openTeamsNotification(input: CalendarEventInput, teamsUrlOverride?: string) {
   const runtime = await getRuntimeConfig()
-  const teamsUrl = (runtime.teamsMeetingChatUrl || '').trim()
+  const teamsUrl = (teamsUrlOverride || runtime.teamsMeetingChatUrl || '').trim()
   if (!teamsUrl) {
     return { ok: false as const, reason: 'NO_URL' as const }
   }

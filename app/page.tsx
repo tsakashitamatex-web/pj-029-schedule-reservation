@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, importPj020MigrationData, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
+import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, importPj020MigrationData, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveNotificationSetting, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeNotificationSettings, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type NotificationSettingRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 import { openEmailNotification, shouldOpenEmail } from '../lib/email'
@@ -98,8 +98,9 @@ export default function Home(){
   const [resourceTypes,setResourceTypes]=useState<ResourceTypeRecord[]>([])
   const [managementDivisions,setManagementDivisions]=useState<ManagementDivisionRecord[]>([])
   const [eventCategories,setEventCategories]=useState<EventCategoryRecord[]>([])
+  const [notificationSettings,setNotificationSettings]=useState<NotificationSettingRecord[]>([])
   const [masterOpen,setMasterOpen]=useState(false)
-  const [masterTab,setMasterTab]=useState<'resources'|'resourceTypes'|'managementDivisions'|'categories'>('resources')
+  const [masterTab,setMasterTab]=useState<'resources'|'resourceTypes'|'managementDivisions'|'categories'|'notifications'>('resources')
   const [editingResource,setEditingResource]=useState<ResourceMasterRecord | null>(null)
   const [editingResourceType,setEditingResourceType]=useState<ResourceTypeRecord | null>(null)
   const [editingManagementDivision,setEditingManagementDivision]=useState<ManagementDivisionRecord | null>(null)
@@ -148,6 +149,7 @@ export default function Home(){
     const stopResourceTypes = subscribeResourceTypes(setResourceTypes)
     const stopManagementDivisions = subscribeManagementDivisions(setManagementDivisions)
     const stopCategories = subscribeEventCategories(setEventCategories)
+    const stopNotificationSettings = subscribeNotificationSettings(setNotificationSettings)
 
     return ()=>{
       active = false
@@ -157,6 +159,7 @@ export default function Home(){
       stopResourceTypes()
       stopManagementDivisions()
       stopCategories()
+      stopNotificationSettings()
     }
   },[])
 
@@ -461,6 +464,22 @@ export default function Home(){
     }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
   }
 
+  async function submitNotificationSetting(e:FormEvent<HTMLFormElement>){
+    e.preventDefault()
+    const formElement=e.currentTarget
+    setMasterState('saving'); setMasterError('')
+    const form=new FormData(formElement)
+    try{
+      await saveNotificationSetting({
+        name:String(form.get('notificationName')||'来客会議通知'),
+        teamsUrl:String(form.get('teamsUrl')||'').trim(),
+        target:'visitor_meeting',
+        active:form.get('notificationActive')==='on',
+      })
+      setMasterState('idle')
+    }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
+  }
+
   async function submitEventCategory(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
     const formElement=e.currentTarget
@@ -610,7 +629,8 @@ export default function Home(){
       }
 
       if (shouldOpenTeams(input)) {
-        const teams = await openTeamsNotification(input)
+        const teamsSetting = notificationSettings.find((row)=>row.target==='visitor_meeting' && row.active)
+        const teams = await openTeamsNotification(input, teamsSetting?.teamsUrl)
         if (teams.ok) {
           message += teams.copied ? ' Teams通知文をコピーし、通知先を開きました。' : ' Teams通知先を開きました。'
         } else if (teams.reason === 'NO_URL') {
@@ -648,7 +668,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.4.4</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.4.5</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -860,6 +880,7 @@ export default function Home(){
         <button type="button" className={masterTab==='resourceTypes'?'active':''} onClick={()=>setMasterTab('resourceTypes')}>リソース種別</button>
         <button type="button" className={masterTab==='managementDivisions'?'active':''} onClick={()=>setMasterTab('managementDivisions')}>管理区分</button>
         <button type="button" className={masterTab==='categories'?'active':''} onClick={()=>setMasterTab('categories')}>予定種別</button>
+        <button type="button" className={masterTab==='notifications'?'active':''} onClick={()=>setMasterTab('notifications')}>通知設定</button>
       </div>
       {masterTab==='resources'&&<>
         <form className="master-form" onSubmit={submitResourceMaster} key={editingResource?.id||'new-resource'}>
@@ -903,6 +924,15 @@ export default function Home(){
         </form>
         <div className="master-list">{categoryOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingCategory(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeEventCategory(row)}>削除</button></div></div>)}</div>
       </>}
+      {masterTab==='notifications'&&<>
+        <form className="master-form notification-master-form" onSubmit={submitNotificationSetting} key={notificationSettings[0]?.id||'notification-setting'}>
+          <input name="notificationName" required placeholder="通知先名" defaultValue={notificationSettings[0]?.name||'来客会議通知'}/>
+          <input name="teamsUrl" type="url" required placeholder="TeamsチャットURL" defaultValue={notificationSettings[0]?.teamsUrl||''}/>
+          <label className="check-field"><input name="notificationActive" type="checkbox" defaultChecked={notificationSettings[0]?.active??true}/> 有効</label>
+          <button className="btn primary" type="submit">保存</button>
+        </form>
+        <div className="auto-info">来客を伴う会議室予約でTeams通知をONにした場合、このURLを開きます。</div>
+      </>}
       {masterState==='error'&&<div className="error">保存に失敗しました。<br/><small>{masterError}</small></div>}
     </div></div>}
 
@@ -923,7 +953,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.4</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.5</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

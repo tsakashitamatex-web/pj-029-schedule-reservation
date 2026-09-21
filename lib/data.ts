@@ -151,7 +151,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.4.3',
+    version: '0.4.4',
   })
 
   const writes: Promise<unknown>[] = []
@@ -173,7 +173,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
       eventId: eventRef.id,
       channel: 'email',
       type: 'event_created',
-      status: 'pending',
+      status: 'pending_user_send',
       recipients: input.participantEmails,
       createdAt: serverTimestamp(),
     }))
@@ -220,7 +220,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.4.3',
+    version: '0.4.4',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -247,7 +247,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
       eventId,
       channel: 'email',
       type: 'event_updated',
-      status: 'pending',
+      status: 'pending_user_send',
       recipients: input.participantEmails,
       createdAt: serverTimestamp(),
     }))
@@ -277,7 +277,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.4.3',
+    version: '0.4.4',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -908,7 +908,7 @@ export async function importPj020MigrationData(raw: string) {
         notifyEmail: false,
         notifyTeams: false,
         status: 'active',
-        version: '0.4.3',
+        version: '0.4.4',
         migratedAt: serverTimestamp(),
         sourceCreatedAt: row.createdAt ?? null,
         legacyReservation: {
@@ -962,7 +962,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.4.3',
+    appVersion: '0.4.4',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

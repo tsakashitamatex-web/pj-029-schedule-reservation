@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, importPj020MigrationData, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
+import { openEmailNotification, shouldOpenEmail } from '../lib/email'
 
 type ViewMode = 'month' | 'week' | 'day'
 type UiEvent = CalendarEventRecord & { demo?: boolean }
@@ -573,7 +574,7 @@ export default function Home(){
       endTime:allDay ? '23:59' : String(form.get('endTime')||'11:00'),
       allDay,
       category:String(form.get('category')||'other') as CalendarEventInput['category'],
-      scope:String(form.get('scope')||'personal') as CalendarEventInput['scope'],
+      scope:'company',
       source:'pj029',
       participants:selectedEmployees.map((employee)=>employee.name).join('・'),
       participantIds:selectedEmployees.map((employee)=>employee.id),
@@ -600,6 +601,13 @@ export default function Home(){
         : result?.demo
           ? '予定を画面へ追加しました。Firebase接続後はFirestoreに保存されます。'
           : '予定をFirestoreへ保存しました。'
+
+      if (shouldOpenEmail(input)) {
+        const email = openEmailNotification(input, editingEvent ? 'update' : 'new')
+        if (email.ok) {
+          message += ' メール作成画面を開きました。内容を確認して送信してください。'
+        }
+      }
 
       if (shouldOpenTeams(input)) {
         const teams = await openTeamsNotification(input)
@@ -640,7 +648,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.4.3</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.4.4</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -766,7 +774,7 @@ export default function Home(){
       <div className="modal-head"><div><div className="eyebrow">会社予定・個人予定・設備／リソース予約</div><h2>{editingEvent?'予定を編集':'予定を作成'}</h2></div><button className="icon-btn" type="button" onClick={()=>setEventOpen(false)}>×</button></div>
       {eventState==='sent'?<div className="success">予定を登録しました。<div className="modal-actions"><button type="button" className="btn primary" onClick={()=>setEventOpen(false)}>閉じる</button></div></div>:<form onSubmit={submitEvent}>
         <label className="field">タイトル<input name="title" required placeholder="例：姫路出張、○○工場定修工事、ABC社打合せ" defaultValue={editingEvent?.title||''}/></label>
-        <div className="form-grid two"><label className="field">予定種別<select name="category" defaultValue={editingEvent?.category||categoryOptions[0]?.id||"meeting"}>{categoryOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select></label><label className="field">公開範囲<select name="scope" defaultValue={editingEvent?.scope||"personal"}><option value="personal">個人</option><option value="department">部署</option><option value="company">全社</option></select></label></div>
+        <label className="field">予定種別<select name="category" defaultValue={editingEvent?.category||categoryOptions[0]?.id||"meeting"}>{categoryOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select></label>
         <label className="check-field"><input name="allDay" type="checkbox" defaultChecked={editingEvent?.allDay??draftAllDay}/> 終日予定</label>
         <div className="form-grid four"><label className="field">開始日<input name="date" type="date" required defaultValue={editingEvent?.date||draftStartDate}/></label><label className="field">終了日<input name="endDate" type="date" required defaultValue={editingEvent?.endDate||editingEvent?.date||draftEndDate}/></label><label className="field">開始<input name="startTime" type="time" defaultValue={editingEvent?.startTime||"10:00"}/></label><label className="field">終了<input name="endTime" type="time" defaultValue={editingEvent?.endTime||"11:00"}/></label></div>
         <label className="field">場所<input name="location" placeholder="例：JFE倉敷、東京本社、Web" defaultValue={editingEvent?.location||''}/></label>
@@ -915,7 +923,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.3</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.4</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

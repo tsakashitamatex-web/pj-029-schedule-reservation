@@ -58,6 +58,14 @@ export type EventCategoryRecord = {
   active: boolean
 }
 
+export type NotificationSettingRecord = {
+  id: string
+  name: string
+  teamsUrl: string
+  target: 'visitor_meeting'
+  active: boolean
+}
+
 export type CalendarEventInput = {
   title: string
   date: string
@@ -151,7 +159,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.4.4',
+    version: '0.4.5',
   })
 
   const writes: Promise<unknown>[] = []
@@ -220,7 +228,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.4.4',
+    version: '0.4.5',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -277,7 +285,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.4.4',
+    version: '0.4.5',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -693,6 +701,55 @@ export async function deactivateResourceMaster(resourceId: string) {
   })
 }
 
+
+export function subscribeNotificationSettings(onChange: (settings: NotificationSettingRecord[]) => void): Unsubscribe {
+  let unsubscribe: Unsubscribe = () => undefined
+  let active = true
+
+  Promise.all([ensureSignedIn(), getDb()]).then(([signedIn, db]) => {
+    if (!active) return
+    if (!signedIn || !db) {
+      onChange([])
+      return
+    }
+    unsubscribe = onSnapshot(collection(db, 'notificationSettings'), (snapshot) => {
+      const rows = snapshot.docs
+        .map((settingDoc) => {
+          const data = settingDoc.data() as Partial<Omit<NotificationSettingRecord, 'id'>>
+          return {
+            id: settingDoc.id,
+            name: data.name ?? '',
+            teamsUrl: data.teamsUrl ?? '',
+            target: data.target ?? 'visitor_meeting',
+            active: data.active ?? true,
+          } satisfies NotificationSettingRecord
+        })
+        .filter((row) => row.active)
+      onChange(rows)
+    })
+  })
+
+  return () => { active = false; unsubscribe() }
+}
+
+export async function saveNotificationSetting(
+  input: Omit<NotificationSettingRecord, 'id'>,
+  settingId = 'visitor-meeting',
+) {
+  const signedIn = await ensureSignedIn()
+  const db = await getDb()
+  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
+
+  await writeBatch(db)
+    .set(doc(db, 'notificationSettings', settingId), {
+      ...input,
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+    .commit()
+
+  return settingId
+}
+
 export function subscribeEventCategories(onChange: (categories: EventCategoryRecord[]) => void): Unsubscribe {
   let unsubscribe: Unsubscribe = () => undefined
   let active = true
@@ -908,7 +965,7 @@ export async function importPj020MigrationData(raw: string) {
         notifyEmail: false,
         notifyTeams: false,
         status: 'active',
-        version: '0.4.4',
+        version: '0.4.5',
         migratedAt: serverTimestamp(),
         sourceCreatedAt: row.createdAt ?? null,
         legacyReservation: {
@@ -962,7 +1019,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.4.4',
+    appVersion: '0.4.5',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

@@ -12,6 +12,7 @@ export async function GET() {
         appId: process.env.FIREBASE_APP_ID || '',
       },
       teamsMeetingChatUrl: process.env.TEAMS_MEETING_CHAT_URL || '',
+      loginEmail: process.env.PJ029_LOGIN_EMAIL || '',
     },
     {
       headers: {

@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, importPj020MigrationData, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
-import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
+import { getRuntimeConfig, isFirebaseConfigValid, loginWithPassword, logout, subscribeAuthState } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 import { openEmailNotification, shouldOpenEmail } from '../lib/email'
 
@@ -83,6 +83,10 @@ export default function Home(){
   const [notice,setNotice]=useState('')
   const [loadState,setLoadState]=useState<'確認中'|'同期中'|'デモ'>('確認中')
   const [firebaseConfigured,setFirebaseConfigured]=useState(false)
+  const [authReady,setAuthReady]=useState(false)
+  const [loggedIn,setLoggedIn]=useState(false)
+  const [loginState,setLoginState]=useState<'idle'|'loading'|'error'>('idle')
+  const [loginError,setLoginError]=useState('')
   const [showCompany,setShowCompany]=useState(true)
   const [showPersonal,setShowPersonal]=useState(true)
   const [showDepartment,setShowDepartment]=useState(true)
@@ -126,26 +130,46 @@ export default function Home(){
   const [isMonthDragging,setIsMonthDragging]=useState(false)
 
   useEffect(()=>{
-    let stop: () => void = () => {}
     let active = true
+    let stopAuth: (()=>void) | undefined
 
     getRuntimeConfig()
       .then((runtime)=>{
         if (!active) return
-        const configured = isFirebaseConfigValid(runtime.firebase)
-        setFirebaseConfigured(configured)
-        setLoadState(configured ? '同期中' : 'デモ')
-        if (configured) {
-          stop = subscribeCalendarEvents(rows=>{ setEvents(rows); setLoadState('同期中') })
-        }
+        setFirebaseConfigured(isFirebaseConfigValid(runtime.firebase))
       })
       .catch(()=>{
         if (!active) return
         setFirebaseConfigured(false)
-        setLoadState('デモ')
       })
 
+    subscribeAuthState((user)=>{
+      if (!active) return
+      setLoggedIn(Boolean(user))
+      setAuthReady(true)
+    }).then((stop)=>{ stopAuth=stop })
+
+    return ()=>{
+      active=false
+      stopAuth?.()
+    }
+  },[])
+
+  useEffect(()=>{
+    if (!loggedIn) {
+      setEvents([])
+      setEmployees([])
+      setResourceMasters([])
+      setResourceTypes([])
+      setManagementDivisions([])
+      setEventCategories([])
+      setLoadState(firebaseConfigured ? '確認中' : 'デモ')
+      return
+    }
+
+    setLoadState('同期中')
     ensureDefaultMasters().catch(()=>undefined)
+    const stop = subscribeCalendarEvents(rows=>{ setEvents(rows); setLoadState('同期中') })
     const stopEmployees = subscribeEmployees(setEmployees)
     const stopResources = subscribeResourceMasters(setResourceMasters)
     const stopResourceTypes = subscribeResourceTypes(setResourceTypes)
@@ -153,7 +177,6 @@ export default function Home(){
     const stopCategories = subscribeEventCategories(setEventCategories)
 
     return ()=>{
-      active = false
       stop()
       stopEmployees()
       stopResources()
@@ -161,7 +184,36 @@ export default function Home(){
       stopManagementDivisions()
       stopCategories()
     }
-  },[])
+  },[loggedIn,firebaseConfigured])
+
+  async function submitLogin(e:FormEvent<HTMLFormElement>){
+    e.preventDefault()
+    const form=new FormData(e.currentTarget)
+    const password=String(form.get('password')||'')
+    setLoginState('loading')
+    setLoginError('')
+    try{
+      await loginWithPassword(password)
+      setLoginState('idle')
+    }catch(err){
+      const code = typeof err==='object' && err && 'code' in err ? String((err as {code?:unknown}).code||'') : ''
+      setLoginError(
+        code.includes('invalid-credential') || code.includes('wrong-password')
+          ? 'パスワードが違います。'
+          : code.includes('too-many-requests')
+            ? 'ログイン試行回数が多いため、一時的に制限されています。しばらくしてから再度お試しください。'
+            : err instanceof Error && err.message==='LOGIN_EMAIL_NOT_CONFIGURED'
+              ? 'ログイン用アカウントが未設定です。'
+              : 'ログインできませんでした。'
+      )
+      setLoginState('error')
+    }
+  }
+
+  async function handleLogout(){
+    await logout()
+    setNotice('')
+  }
 
   const selected=dateFromKey(selectedDate)
   const weekStart=startOfWeek(selected)
@@ -660,15 +712,33 @@ export default function Home(){
     }catch{ setFeedbackState('error') }
   }
 
+  if (!authReady) {
+    return <main className="login-shell"><div className="login-card"><div className="eyebrow">PJ-029 / Ver.0.4.7</div><h1>会社スケジュール・予約管理</h1><p>ログイン状態を確認しています。</p></div></main>
+  }
+
+  if (!loggedIn) {
+    return <main className="login-shell">
+      <form className="login-card" onSubmit={submitLogin}>
+        <div className="eyebrow">PJ-029 / Ver.0.4.7</div>
+        <h1>会社スケジュール・予約管理</h1>
+        <p>社内利用パスワードを入力してください。</p>
+        <label className="field">パスワード<input name="password" type="password" required autoComplete="current-password" autoFocus/></label>
+        {loginState==='error'&&<div className="error">{loginError}</div>}
+        <button className="btn primary login-button" type="submit" disabled={loginState==='loading'}>{loginState==='loading'?'確認中…':'ログイン'}</button>
+      </form>
+    </main>
+  }
+
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.4.6</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.4.7</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
         <button className="btn secondary" type="button" onClick={()=>setEmployeeMasterOpen(true)}>社員マスタ</button>
         <button className="btn secondary" type="button" onClick={()=>setMasterOpen(true)}>各種マスタ</button>
         <button className="btn secondary" type="button" onClick={()=>setNotice('設備・リソース予約は通常の予定登録画面から行います。')}>設備・リソース</button>
+        <button className="btn secondary" type="button" onClick={handleLogout}>ログアウト</button>
         <button className="btn primary" type="button" onClick={()=>openNewEvent()}>＋ 予定を作成</button>
       </div>
     </header>
@@ -945,7 +1015,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.6</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.7</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

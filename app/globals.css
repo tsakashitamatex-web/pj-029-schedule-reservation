@@ -96,3 +96,10 @@
 @media(max-width:900px){
   .category-master-main,.category-notify-settings{grid-template-columns:1fr}
 }
+
+.login-shell{min-height:100vh;display:grid;place-items:center;padding:20px;background:var(--bg)}
+.login-card{width:min(420px,100%);background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px;box-shadow:0 12px 32px rgba(16,35,63,.12)}
+.login-card h1{font-size:22px;margin:6px 0 10px;color:var(--navy)}
+.login-card p{margin:0 0 18px;color:var(--muted);font-size:14px;line-height:1.6}
+.login-card .field{margin:0 0 14px}
+.login-button{width:100%}

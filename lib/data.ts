@@ -154,7 +154,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.4.6',
+    version: '0.4.7',
   })
 
   const writes: Promise<unknown>[] = []
@@ -223,7 +223,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.4.6',
+    version: '0.4.7',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -280,7 +280,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.4.6',
+    version: '0.4.7',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -915,7 +915,7 @@ export async function importPj020MigrationData(raw: string) {
         notifyEmail: false,
         notifyTeams: false,
         status: 'active',
-        version: '0.4.6',
+        version: '0.4.7',
         migratedAt: serverTimestamp(),
         sourceCreatedAt: row.createdAt ?? null,
         legacyReservation: {
@@ -969,7 +969,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.4.6',
+    appVersion: '0.4.7',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }

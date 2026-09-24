@@ -1,5 +1,5 @@
 import { getApps, initializeApp } from 'firebase/app'
-import { getAuth, signInAnonymously, type Auth } from 'firebase/auth'
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, type Auth, type User } from 'firebase/auth'
 import { getFirestore, type Firestore } from 'firebase/firestore'
 
 export type RuntimeConfig = {
@@ -12,6 +12,7 @@ export type RuntimeConfig = {
     appId: string
   }
   teamsMeetingChatUrl: string
+  loginEmail: string
 }
 
 let runtimeConfigPromise: Promise<RuntimeConfig> | null = null
@@ -55,13 +56,27 @@ export function getFirebaseAuth() {
 
 export async function ensureSignedIn() {
   const auth = await getFirebaseAuth()
-  if (!auth) return false
-  if (auth.currentUser) return true
-  try {
-    await signInAnonymously(auth)
-    return true
-  } catch (error) {
-    console.error('Firebase anonymous sign-in failed', error)
-    return false
+  return Boolean(auth?.currentUser)
+}
+
+export async function loginWithPassword(password: string) {
+  const [auth, runtime] = await Promise.all([getFirebaseAuth(), getRuntimeConfig()])
+  if (!auth) throw new Error('AUTH_NOT_CONFIGURED')
+  const email = runtime.loginEmail.trim()
+  if (!email) throw new Error('LOGIN_EMAIL_NOT_CONFIGURED')
+  await signInWithEmailAndPassword(auth, email, password)
+}
+
+export async function logout() {
+  const auth = await getFirebaseAuth()
+  if (auth) await signOut(auth)
+}
+
+export async function subscribeAuthState(onChange: (user: User | null) => void) {
+  const auth = await getFirebaseAuth()
+  if (!auth) {
+    onChange(null)
+    return () => undefined
   }
+  return onAuthStateChanged(auth, onChange)
 }

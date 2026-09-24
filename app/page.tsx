@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, importPj020MigrationData, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveNotificationSetting, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeNotificationSettings, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type NotificationSettingRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
+import { cancelCalendarEvent, deactivateEmployee, deactivateEventCategory, deactivateManagementDivision, deactivateResourceMaster, deactivateResourceType, ensureDefaultMasters, importPj020MigrationData, saveCalendarEvent, saveEmployee, saveEventCategory, saveFeedback, saveManagementDivision, saveResourceMaster, saveResourceType, subscribeCalendarEvents, subscribeEmployees, subscribeEventCategories, subscribeManagementDivisions, subscribeResourceMasters, subscribeResourceTypes, updateCalendarEvent, type CalendarEventInput, type CalendarEventRecord, type EmployeeRecord, type EventCategoryRecord, type ManagementDivisionRecord, type ResourceMasterRecord, type ResourceTypeRecord } from '../lib/data'
 import { getRuntimeConfig, isFirebaseConfigValid } from '../lib/firebase'
 import { openTeamsNotification, shouldOpenTeams } from '../lib/teams'
 import { openEmailNotification, shouldOpenEmail } from '../lib/email'
@@ -98,9 +98,8 @@ export default function Home(){
   const [resourceTypes,setResourceTypes]=useState<ResourceTypeRecord[]>([])
   const [managementDivisions,setManagementDivisions]=useState<ManagementDivisionRecord[]>([])
   const [eventCategories,setEventCategories]=useState<EventCategoryRecord[]>([])
-  const [notificationSettings,setNotificationSettings]=useState<NotificationSettingRecord[]>([])
   const [masterOpen,setMasterOpen]=useState(false)
-  const [masterTab,setMasterTab]=useState<'resources'|'resourceTypes'|'managementDivisions'|'categories'|'notifications'>('resources')
+  const [masterTab,setMasterTab]=useState<'resources'|'resourceTypes'|'managementDivisions'|'categories'>('resources')
   const [editingResource,setEditingResource]=useState<ResourceMasterRecord | null>(null)
   const [editingResourceType,setEditingResourceType]=useState<ResourceTypeRecord | null>(null)
   const [editingManagementDivision,setEditingManagementDivision]=useState<ManagementDivisionRecord | null>(null)
@@ -119,6 +118,9 @@ export default function Home(){
   const [draftStartDate,setDraftStartDate]=useState(todayKey())
   const [draftEndDate,setDraftEndDate]=useState(todayKey())
   const [draftAllDay,setDraftAllDay]=useState(false)
+  const [draftCategoryId,setDraftCategoryId]=useState('meeting')
+  const [draftNotifyEmail,setDraftNotifyEmail]=useState(false)
+  const [draftNotifyTeams,setDraftNotifyTeams]=useState(false)
   const [dragStartDate,setDragStartDate]=useState<string | null>(null)
   const [dragEndDate,setDragEndDate]=useState<string | null>(null)
   const [isMonthDragging,setIsMonthDragging]=useState(false)
@@ -149,7 +151,6 @@ export default function Home(){
     const stopResourceTypes = subscribeResourceTypes(setResourceTypes)
     const stopManagementDivisions = subscribeManagementDivisions(setManagementDivisions)
     const stopCategories = subscribeEventCategories(setEventCategories)
-    const stopNotificationSettings = subscribeNotificationSettings(setNotificationSettings)
 
     return ()=>{
       active = false
@@ -159,7 +160,6 @@ export default function Home(){
       stopResourceTypes()
       stopManagementDivisions()
       stopCategories()
-      stopNotificationSettings()
     }
   },[])
 
@@ -217,7 +217,7 @@ export default function Home(){
   const categoryOptions = useMemo(() => {
     if (eventCategories.length) return eventCategories
     return Object.entries(categoryLabels).map(([id,name],index)=>({
-      id,name,color:'#6b7280',sortOrder:index+1,active:true,
+      id,name,color:'#6b7280',sortOrder:index+1,active:true,notifyEmailDefault:false,notifyTeamsDefault:false,teamsUrl:'',
     }))
   }, [eventCategories])
 
@@ -244,6 +244,10 @@ export default function Home(){
     setEditingEvent(null)
     setSelectedEmployeeIds([])
     setSelectedResourceIds([])
+    const defaultCategory=categoryOptions[0]
+    setDraftCategoryId(defaultCategory?.id||'meeting')
+    setDraftNotifyEmail(defaultCategory?.notifyEmailDefault??false)
+    setDraftNotifyTeams(defaultCategory?.notifyTeamsDefault??false)
     setEventOpen(true)
     requestAnimationFrame(()=>{
       const timeInput=document.querySelector<HTMLInputElement>('input[name="startTime"]')
@@ -464,22 +468,6 @@ export default function Home(){
     }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
   }
 
-  async function submitNotificationSetting(e:FormEvent<HTMLFormElement>){
-    e.preventDefault()
-    const formElement=e.currentTarget
-    setMasterState('saving'); setMasterError('')
-    const form=new FormData(formElement)
-    try{
-      await saveNotificationSetting({
-        name:String(form.get('notificationName')||'来客会議通知'),
-        teamsUrl:String(form.get('teamsUrl')||'').trim(),
-        target:'visitor_meeting',
-        active:form.get('notificationActive')==='on',
-      })
-      setMasterState('idle')
-    }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
-  }
-
   async function submitEventCategory(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
     const formElement=e.currentTarget
@@ -491,6 +479,9 @@ export default function Home(){
         color:String(form.get('categoryColor')||'#6b7280'),
         sortOrder:Number(form.get('categorySortOrder')||999),
         active:true,
+        notifyEmailDefault:form.get('categoryNotifyEmail')==='on',
+        notifyTeamsDefault:form.get('categoryNotifyTeams')==='on',
+        teamsUrl:String(form.get('categoryTeamsUrl')||'').trim(),
       }, editingCategory?.id)
       setEditingCategory(null); formElement.reset(); setMasterState('idle')
     }catch(err){ setMasterError(err instanceof Error?err.message:String(err)); setMasterState('error') }
@@ -553,6 +544,9 @@ export default function Home(){
     setDraftStartDate(event.date)
     setDraftEndDate(event.endDate || event.date)
     setDraftAllDay(event.allDay)
+    setDraftCategoryId(event.category)
+    setDraftNotifyEmail(event.notifyEmail)
+    setDraftNotifyTeams(event.notifyTeams)
     setSelectedEmployeeIds(
       event.participantIds?.length
         ? event.participantIds
@@ -592,7 +586,7 @@ export default function Home(){
       startTime:allDay ? '00:00' : String(form.get('startTime')||'10:00'),
       endTime:allDay ? '23:59' : String(form.get('endTime')||'11:00'),
       allDay,
-      category:String(form.get('category')||'other') as CalendarEventInput['category'],
+      category:draftCategoryId as CalendarEventInput['category'],
       scope:'company',
       source:'pj029',
       participants:selectedEmployees.map((employee)=>employee.name).join('・'),
@@ -606,8 +600,8 @@ export default function Home(){
       resourceNames:resourceOptions.filter((row)=>selectedResourceIds.includes(row.id)).map((row)=>row.name),
       meetingRoom:resourceOptions.find((row)=>selectedResourceIds.includes(row.id) && row.typeId==='meeting_room')?.name||'',
       vehicle:resourceOptions.find((row)=>selectedResourceIds.includes(row.id) && row.typeId==='vehicle')?.name||'',
-      notifyEmail:form.get('notifyEmail')==='on',
-      notifyTeams:form.get('notifyTeams')==='on',
+      notifyEmail:draftNotifyEmail,
+      notifyTeams:draftNotifyTeams,
     }
 
     try{
@@ -629,8 +623,8 @@ export default function Home(){
       }
 
       if (shouldOpenTeams(input)) {
-        const teamsSetting = notificationSettings.find((row)=>row.target==='visitor_meeting' && row.active)
-        const teams = await openTeamsNotification(input, teamsSetting?.teamsUrl)
+        const teamsUrl = categoryOptions.find((row)=>row.id===input.category)?.teamsUrl
+        const teams = await openTeamsNotification(input, teamsUrl)
         if (teams.ok) {
           message += teams.copied ? ' Teams通知文をコピーし、通知先を開きました。' : ' Teams通知先を開きました。'
         } else if (teams.reason === 'NO_URL') {
@@ -668,7 +662,7 @@ export default function Home(){
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">PJ-029 / Ver.0.4.5</div><h1>会社スケジュール・予約管理</h1></div>
+      <div><div className="eyebrow">PJ-029 / Ver.0.4.6</div><h1>会社スケジュール・予約管理</h1></div>
       <div className="top-actions">
         <span className={`status-chip ${firebaseConfigured?'ok':''}`}>{connectionText}</span>
         <button className="btn secondary" type="button" onClick={()=>setNotice('会社カレンダーはPJ-029内で全社予定として管理します。Googleカレンダー連携は行いません。')}>会社カレンダー</button>
@@ -779,7 +773,6 @@ export default function Home(){
         <div><span>社内参加者</span><strong>{selectedEvent.participants||'未設定'}</strong></div>
         <div><span>外部参加者・来訪者</span><strong>{selectedEvent.externalParticipants||'なし'}</strong></div>
         <div><span>予約設備・リソース</span><strong>{selectedEvent.resourceNames?.length?selectedEvent.resourceNames.join('、'):selectedEvent.resource||'なし'}</strong></div>
-        <div><span>公開範囲</span><strong>{scopeLabels[selectedEvent.scope]}</strong></div>
       </div>
       {selectedEvent.description&&<div className="detail-description"><span>詳細</span><p>{selectedEvent.description}</p></div>}
       <div className="modal-actions detail-actions">
@@ -794,7 +787,7 @@ export default function Home(){
       <div className="modal-head"><div><div className="eyebrow">会社予定・個人予定・設備／リソース予約</div><h2>{editingEvent?'予定を編集':'予定を作成'}</h2></div><button className="icon-btn" type="button" onClick={()=>setEventOpen(false)}>×</button></div>
       {eventState==='sent'?<div className="success">予定を登録しました。<div className="modal-actions"><button type="button" className="btn primary" onClick={()=>setEventOpen(false)}>閉じる</button></div></div>:<form onSubmit={submitEvent}>
         <label className="field">タイトル<input name="title" required placeholder="例：姫路出張、○○工場定修工事、ABC社打合せ" defaultValue={editingEvent?.title||''}/></label>
-        <label className="field">予定種別<select name="category" defaultValue={editingEvent?.category||categoryOptions[0]?.id||"meeting"}>{categoryOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select></label>
+        <label className="field">予定種別<select name="category" value={draftCategoryId} onChange={e=>{const id=e.target.value;const row=categoryOptions.find((item)=>item.id===id);setDraftCategoryId(id);setDraftNotifyEmail(row?.notifyEmailDefault??false);setDraftNotifyTeams(row?.notifyTeamsDefault??false)}}>{categoryOptions.map(row=><option value={row.id} key={row.id}>{row.name}</option>)}</select></label>
         <label className="check-field"><input name="allDay" type="checkbox" defaultChecked={editingEvent?.allDay??draftAllDay}/> 終日予定</label>
         <div className="form-grid four"><label className="field">開始日<input name="date" type="date" required defaultValue={editingEvent?.date||draftStartDate}/></label><label className="field">終了日<input name="endDate" type="date" required defaultValue={editingEvent?.endDate||editingEvent?.date||draftEndDate}/></label><label className="field">開始<input name="startTime" type="time" defaultValue={editingEvent?.startTime||"10:00"}/></label><label className="field">終了<input name="endTime" type="time" defaultValue={editingEvent?.endTime||"11:00"}/></label></div>
         <label className="field">場所<input name="location" placeholder="例：JFE倉敷、東京本社、Web" defaultValue={editingEvent?.location||''}/></label>
@@ -831,7 +824,7 @@ export default function Home(){
           </div>
         </div>
         <label className="field">詳細<textarea name="description" rows={3} placeholder="目的、工事内容、訪問先、連絡事項など" defaultValue={editingEvent?.description||''}/></label>
-        <div className="check-row"><label><input name="notifyEmail" type="checkbox" defaultChecked={editingEvent?.notifyEmail||false}/> 選択した社内参加者へメール通知</label><label><input name="notifyTeams" type="checkbox" defaultChecked={editingEvent?.notifyTeams||false}/> Teams通知（来客会議室予約）</label></div>
+        <div className="check-row"><label><input name="notifyEmail" type="checkbox" checked={draftNotifyEmail} onChange={e=>setDraftNotifyEmail(e.target.checked)}/> 選択した社内参加者へメール通知</label><label><input name="notifyTeams" type="checkbox" checked={draftNotifyTeams} onChange={e=>setDraftNotifyTeams(e.target.checked)}/> Teams通知</label></div>
         {eventState==='conflict'&&<div className="error">この設備は指定時間帯に既に予約されています。時間または設備を変更してください。</div>}
         {eventState==='error'&&<div className="error">保存に失敗しました。<br/><small>エラー：{eventError || '詳細不明'}</small></div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setEventOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={eventState==='saving'}>{eventState==='saving'?'保存中…':editingEvent?'更新する':'登録する'}</button></div>
@@ -880,7 +873,6 @@ export default function Home(){
         <button type="button" className={masterTab==='resourceTypes'?'active':''} onClick={()=>setMasterTab('resourceTypes')}>リソース種別</button>
         <button type="button" className={masterTab==='managementDivisions'?'active':''} onClick={()=>setMasterTab('managementDivisions')}>管理区分</button>
         <button type="button" className={masterTab==='categories'?'active':''} onClick={()=>setMasterTab('categories')}>予定種別</button>
-        <button type="button" className={masterTab==='notifications'?'active':''} onClick={()=>setMasterTab('notifications')}>通知設定</button>
       </div>
       {masterTab==='resources'&&<>
         <form className="master-form" onSubmit={submitResourceMaster} key={editingResource?.id||'new-resource'}>
@@ -915,23 +907,23 @@ export default function Home(){
         <div className="master-list">{managementDivisionOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingManagementDivision(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeManagementDivision(row)}>削除</button></div></div>)}</div>
       </>}
       {masterTab==='categories'&&<>
-        <form className="master-form" onSubmit={submitEventCategory} key={editingCategory?.id||'new-category'}>
-          <input name="categoryName" required placeholder="予定種別名" defaultValue={editingCategory?.name||''}/>
-          <input name="categorySortOrder" type="number" min="0" placeholder="表示順" defaultValue={editingCategory?.sortOrder??999}/>
-          <input name="categoryColor" type="color" defaultValue={editingCategory?.color||'#6b7280'}/>
-          <button className="btn primary" type="submit">{editingCategory?'更新':'追加'}</button>
-          {editingCategory&&<button className="btn secondary" type="button" onClick={()=>setEditingCategory(null)}>取消</button>}
+        <form className="category-master-form" onSubmit={submitEventCategory} key={editingCategory?.id||'new-category'}>
+          <div className="category-master-main">
+            <input name="categoryName" required placeholder="予定種別名" defaultValue={editingCategory?.name||''}/>
+            <input name="categorySortOrder" type="number" min="0" placeholder="表示順" defaultValue={editingCategory?.sortOrder??999}/>
+            <input name="categoryColor" type="color" defaultValue={editingCategory?.color||'#6b7280'}/>
+          </div>
+          <div className="category-notify-settings">
+            <label><input name="categoryNotifyEmail" type="checkbox" defaultChecked={editingCategory?.notifyEmailDefault??false}/> メール通知を初期ON</label>
+            <label><input name="categoryNotifyTeams" type="checkbox" defaultChecked={editingCategory?.notifyTeamsDefault??false}/> Teams通知を初期ON</label>
+            <input name="categoryTeamsUrl" type="url" placeholder="TeamsチャットURL（Teams通知を使う場合）" defaultValue={editingCategory?.teamsUrl||''}/>
+          </div>
+          <div className="employee-row-actions">
+            <button className="btn primary" type="submit">{editingCategory?'更新':'追加'}</button>
+            {editingCategory&&<button className="btn secondary" type="button" onClick={()=>setEditingCategory(null)}>取消</button>}
+          </div>
         </form>
-        <div className="master-list">{categoryOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>表示順 {row.sortOrder}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingCategory(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeEventCategory(row)}>削除</button></div></div>)}</div>
-      </>}
-      {masterTab==='notifications'&&<>
-        <form className="master-form notification-master-form" onSubmit={submitNotificationSetting} key={notificationSettings[0]?.id||'notification-setting'}>
-          <input name="notificationName" required placeholder="通知先名" defaultValue={notificationSettings[0]?.name||'来客会議通知'}/>
-          <input name="teamsUrl" type="url" required placeholder="TeamsチャットURL" defaultValue={notificationSettings[0]?.teamsUrl||''}/>
-          <label className="check-field"><input name="notificationActive" type="checkbox" defaultChecked={notificationSettings[0]?.active??true}/> 有効</label>
-          <button className="btn primary" type="submit">保存</button>
-        </form>
-        <div className="auto-info">来客を伴う会議室予約でTeams通知をONにした場合、このURLを開きます。</div>
+        <div className="master-list">{categoryOptions.map(row=><div className="master-item" key={row.id}><span><i className="employee-color-dot" style={{background:row.color}}/><strong>{row.name}</strong><small>表示順 {row.sortOrder} ／ メール {row.notifyEmailDefault?'ON':'OFF'} ／ Teams {row.notifyTeamsDefault?'ON':'OFF'}{row.teamsUrl?' ／ URL設定済み':''}</small></span><div className="employee-row-actions"><button className="btn secondary" type="button" onClick={()=>setEditingCategory(row)}>修正</button><button className="btn danger" type="button" onClick={()=>removeEventCategory(row)}>削除</button></div></div>)}</div>
       </>}
       {masterState==='error'&&<div className="error">保存に失敗しました。<br/><small>{masterError}</small></div>}
     </div></div>}
@@ -953,7 +945,7 @@ export default function Home(){
       {feedbackState==='sent'?<div className="success">送信しました。ご意見ありがとうございます。</div>:<form onSubmit={submitFeedback}>
         <label className="field">種類<select name="type" defaultValue="improvement"><option value="improvement">改善提案</option><option value="bug">不具合</option><option value="other">その他</option></select></label>
         <label className="field">内容<textarea name="message" rows={6} placeholder="気になった点や改善案を入力してください" required/></label>
-        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.5</div>
+        <div className="auto-info">画面：{viewMode==='month'?'月':viewMode==='day'?'日':'週'}カレンダー ／ バージョン：0.4.6</div>
         {feedbackState==='error'&&<div className="error">送信に失敗しました。</div>}
         <div className="modal-actions"><button type="button" className="btn secondary" onClick={()=>setFeedbackOpen(false)}>キャンセル</button><button type="submit" className="btn primary" disabled={feedbackState==='saving'}>{feedbackState==='saving'?'送信中…':'送信'}</button></div>
       </form>}

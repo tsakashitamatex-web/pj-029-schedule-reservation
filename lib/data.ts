@@ -534,9 +534,6 @@ export function subscribeManagementDivisions(onChange: (divisions: ManagementDiv
             color: data.color ?? '#6b7280',
             sortOrder: data.sortOrder ?? 999,
             active: data.active ?? true,
-            notifyEmailDefault: data.notifyEmailDefault ?? false,
-            notifyTeamsDefault: data.notifyTeamsDefault ?? false,
-            teamsUrl: data.teamsUrl ?? '',
           }
         })
         .filter((row) => row.active)
@@ -720,6 +717,9 @@ export function subscribeEventCategories(onChange: (categories: EventCategoryRec
             color: data.color ?? '#6b7280',
             sortOrder: data.sortOrder ?? 999,
             active: data.active ?? true,
+            notifyEmailDefault: data.notifyEmailDefault ?? false,
+            notifyTeamsDefault: data.notifyTeamsDefault ?? false,
+            teamsUrl: data.teamsUrl ?? '',
           }
         })
         .filter((row) => row.active)

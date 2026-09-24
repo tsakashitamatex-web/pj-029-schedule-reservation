@@ -2,28 +2,24 @@ import type { CalendarEventInput } from './data'
 import { getRuntimeConfig } from './firebase'
 
 export function shouldOpenTeams(input: CalendarEventInput) {
-  return Boolean(
-    input.notifyTeams &&
-    Boolean(input.meetingRoom) &&
-    input.externalParticipants.trim(),
-  )
+  return Boolean(input.notifyTeams)
 }
 
 export function buildTeamsMessage(input: CalendarEventInput, kind: 'new' | 'update' | 'delete' = 'new') {
   const heading =
     kind === 'update'
-      ? '【来客予定 変更】'
+      ? '【予定変更】'
       : kind === 'delete'
-        ? '【来客予定 キャンセル】'
-        : '【来客予定】'
+        ? '【予定キャンセル】'
+        : '【予定通知】'
 
   return [
     heading,
     `日時：${input.date} ${input.startTime}〜${input.endTime}`,
     `項目：${input.resource || '未設定'}`,
-    input.externalParticipants ? `来訪者：${input.externalParticipants}` : '',
-    `予約者・参加者：${input.participants || '未設定'}`,
-    `会議名：${input.title}`,
+    input.externalParticipants ? `外部参加者・来訪者：${input.externalParticipants}` : '',
+    `社内参加者：${input.participants || '未設定'}`,
+    `予定：${input.title}`,
   ].filter(Boolean).join('\n')
 }
 

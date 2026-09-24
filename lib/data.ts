@@ -56,14 +56,9 @@ export type EventCategoryRecord = {
   color: string
   sortOrder: number
   active: boolean
-}
-
-export type NotificationSettingRecord = {
-  id: string
-  name: string
+  notifyEmailDefault: boolean
+  notifyTeamsDefault: boolean
   teamsUrl: string
-  target: 'visitor_meeting'
-  active: boolean
 }
 
 export type CalendarEventInput = {
@@ -159,7 +154,7 @@ export async function saveCalendarEvent(input: CalendarEventInput) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     status: 'active',
-    version: '0.4.5',
+    version: '0.4.6',
   })
 
   const writes: Promise<unknown>[] = []
@@ -228,7 +223,7 @@ export async function updateCalendarEvent(eventId: string, input: CalendarEventI
   batch.update(doc(db, 'events', eventId), {
     ...input,
     updatedAt: serverTimestamp(),
-    version: '0.4.5',
+    version: '0.4.6',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => batch.delete(reservationDoc.ref))
@@ -285,7 +280,7 @@ export async function cancelCalendarEvent(eventId: string) {
     status: 'cancelled',
     updatedAt: serverTimestamp(),
     cancelledAt: serverTimestamp(),
-    version: '0.4.5',
+    version: '0.4.6',
   })
 
   reservationSnapshot.docs.forEach((reservationDoc) => {
@@ -495,14 +490,14 @@ export async function ensureDefaultMasters() {
 
   if (categorySnapshot.empty) {
     const defaults: Array<{ id: string } & Omit<EventCategoryRecord, 'id'>> = [
-      { id: 'meeting', name: '会議', color: '#2563eb', sortOrder: 1, active: true },
-      { id: 'visitor', name: '来客', color: '#db2777', sortOrder: 2, active: true },
-      { id: 'business_trip', name: '出張', color: '#0891b2', sortOrder: 3, active: true },
-      { id: 'construction', name: '工事', color: '#059669', sortOrder: 4, active: true },
-      { id: 'outing', name: '外出', color: '#4f46e5', sortOrder: 5, active: true },
-      { id: 'leave', name: '休暇', color: '#dc2626', sortOrder: 6, active: true },
-      { id: 'company_event', name: '会社行事', color: '#d97706', sortOrder: 7, active: true },
-      { id: 'other', name: 'その他', color: '#6b7280', sortOrder: 8, active: true },
+      { id: 'meeting', name: '会議', color: '#2563eb', sortOrder: 1, active: true, notifyEmailDefault: false, notifyTeamsDefault: false, teamsUrl: '' },
+      { id: 'visitor', name: '来客', color: '#db2777', sortOrder: 2, active: true, notifyEmailDefault: false, notifyTeamsDefault: false, teamsUrl: '' },
+      { id: 'business_trip', name: '出張', color: '#0891b2', sortOrder: 3, active: true, notifyEmailDefault: false, notifyTeamsDefault: false, teamsUrl: '' },
+      { id: 'construction', name: '工事', color: '#059669', sortOrder: 4, active: true, notifyEmailDefault: false, notifyTeamsDefault: false, teamsUrl: '' },
+      { id: 'outing', name: '外出', color: '#4f46e5', sortOrder: 5, active: true, notifyEmailDefault: false, notifyTeamsDefault: false, teamsUrl: '' },
+      { id: 'leave', name: '休暇', color: '#dc2626', sortOrder: 6, active: true, notifyEmailDefault: false, notifyTeamsDefault: false, teamsUrl: '' },
+      { id: 'company_event', name: '会社行事', color: '#d97706', sortOrder: 7, active: true, notifyEmailDefault: false, notifyTeamsDefault: false, teamsUrl: '' },
+      { id: 'other', name: 'その他', color: '#6b7280', sortOrder: 8, active: true, notifyEmailDefault: false, notifyTeamsDefault: false, teamsUrl: '' },
     ]
     defaults.forEach((row) => {
       const { id, ...data } = row
@@ -539,6 +534,9 @@ export function subscribeManagementDivisions(onChange: (divisions: ManagementDiv
             color: data.color ?? '#6b7280',
             sortOrder: data.sortOrder ?? 999,
             active: data.active ?? true,
+            notifyEmailDefault: data.notifyEmailDefault ?? false,
+            notifyTeamsDefault: data.notifyTeamsDefault ?? false,
+            teamsUrl: data.teamsUrl ?? '',
           }
         })
         .filter((row) => row.active)
@@ -701,54 +699,6 @@ export async function deactivateResourceMaster(resourceId: string) {
   })
 }
 
-
-export function subscribeNotificationSettings(onChange: (settings: NotificationSettingRecord[]) => void): Unsubscribe {
-  let unsubscribe: Unsubscribe = () => undefined
-  let active = true
-
-  Promise.all([ensureSignedIn(), getDb()]).then(([signedIn, db]) => {
-    if (!active) return
-    if (!signedIn || !db) {
-      onChange([])
-      return
-    }
-    unsubscribe = onSnapshot(collection(db, 'notificationSettings'), (snapshot) => {
-      const rows = snapshot.docs
-        .map((settingDoc) => {
-          const data = settingDoc.data() as Partial<Omit<NotificationSettingRecord, 'id'>>
-          return {
-            id: settingDoc.id,
-            name: data.name ?? '',
-            teamsUrl: data.teamsUrl ?? '',
-            target: data.target ?? 'visitor_meeting',
-            active: data.active ?? true,
-          } satisfies NotificationSettingRecord
-        })
-        .filter((row) => row.active)
-      onChange(rows)
-    })
-  })
-
-  return () => { active = false; unsubscribe() }
-}
-
-export async function saveNotificationSetting(
-  input: Omit<NotificationSettingRecord, 'id'>,
-  settingId = 'visitor-meeting',
-) {
-  const signedIn = await ensureSignedIn()
-  const db = await getDb()
-  if (!signedIn || !db) throw new Error('AUTH_REQUIRED')
-
-  await writeBatch(db)
-    .set(doc(db, 'notificationSettings', settingId), {
-      ...input,
-      updatedAt: serverTimestamp(),
-    }, { merge: true })
-    .commit()
-
-  return settingId
-}
 
 export function subscribeEventCategories(onChange: (categories: EventCategoryRecord[]) => void): Unsubscribe {
   let unsubscribe: Unsubscribe = () => undefined
@@ -965,7 +915,7 @@ export async function importPj020MigrationData(raw: string) {
         notifyEmail: false,
         notifyTeams: false,
         status: 'active',
-        version: '0.4.5',
+        version: '0.4.6',
         migratedAt: serverTimestamp(),
         sourceCreatedAt: row.createdAt ?? null,
         legacyReservation: {
@@ -1019,7 +969,7 @@ export async function saveFeedback(input: FeedbackInput) {
   const ref = await addDoc(collection(db, 'feedbacks'), {
     ...input,
     createdAt: serverTimestamp(),
-    appVersion: '0.4.5',
+    appVersion: '0.4.6',
     status: 'new',
   })
   return { id: ref.id, demo: false as const }
